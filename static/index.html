@@ -1,0 +1,146 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>RL Live Overlay</title>
+    <link rel="stylesheet" href="/static/overlay.css" />
+  </head>
+  <body>
+    <div id="root">
+      <div id="status">waiting for game…</div>
+
+      <main id="overlay" hidden>
+        <header class="context">
+          <div class="banner" id="banner" hidden></div>
+          <div class="scoreline">
+            <span class="team blue" id="ctx-blue-team">BLUE</span>
+            <span class="num blue" id="ctx-blue-score">0</span>
+            <span class="clock" id="ctx-clock">5:00</span>
+            <span class="num orange" id="ctx-orange-score">0</span>
+            <span class="team orange" id="ctx-orange-team">ORANGE</span>
+          </div>
+          <div class="me-line">
+            <span id="me-name">—</span>
+            <span class="dot"></span>
+            <span id="me-team">unknown team</span>
+          </div>
+        </header>
+
+        <section class="panel match">
+          <h2>MATCH</h2>
+
+          <div class="primary">
+            <div class="big-stat score">
+              <span class="label">SCORE</span>
+              <span class="val" id="m-score">0</span>
+            </div>
+            <div class="big-stat boost">
+              <span class="label">BOOST</span>
+              <span class="val" id="m-boost">0</span>
+              <div class="bar"><div class="fill" id="m-boost-fill"></div></div>
+            </div>
+            <div class="big-stat speed">
+              <span class="label">SPEED</span>
+              <span class="val" id="m-speed">0</span>
+              <div class="bar"><div class="fill" id="m-speed-fill"></div></div>
+            </div>
+          </div>
+
+          <div class="section">
+            <h3>OUTPUT</h3>
+            <ul class="grid">
+              <li><span class="k">Goals</span><span class="v" id="m-goals">0</span></li>
+              <li><span class="k">Shots <em id="m-acc">(0%)</em></span><span class="v" id="m-shots">0</span></li>
+              <li><span class="k">Saves</span><span class="v" id="m-saves">0</span></li>
+              <li><span class="k">Assists</span><span class="v" id="m-assists">0</span></li>
+              <li><span class="k">Score / min</span><span class="v" id="m-score-min">0</span></li>
+              <li><span class="k">Goal partic.</span><span class="v" id="m-goal-part">0%</span></li>
+            </ul>
+          </div>
+
+          <div class="section">
+            <h3>BALL</h3>
+            <ul class="grid">
+              <li><span class="k">Touches</span><span class="v" id="m-touches">0</span></li>
+              <li><span class="k">Ball hits</span><span class="v" id="m-ball-hits">0</span></li>
+              <li><span class="k">Possession</span><span class="v" id="m-possession">0%</span></li>
+              <li><span class="k">Hardest hit</span><span class="v" id="m-hardest">0</span></li>
+              <li><span class="k">Avg shot pwr</span><span class="v" id="m-avg-shot-pwr">0</span></li>
+              <li><span class="k">Last touch</span><span class="v" id="m-last-touch">—</span></li>
+            </ul>
+          </div>
+
+          <div class="section">
+            <h3>BOOST</h3>
+            <ul class="grid">
+              <li><span class="k">Avg</span><span class="v" id="m-boost-avg">0</span></li>
+              <li><span class="k">Wasted</span><span class="v" id="m-boost-wasted">0%</span></li>
+              <li class="wide"><span class="k">Time @ 0 boost</span><span class="v" id="m-zero-boost">0%</span></li>
+            </ul>
+          </div>
+
+          <div class="section">
+            <h3>MOVEMENT</h3>
+            <ul class="grid">
+              <li><span class="k">Supersonic</span><span class="v" id="m-supersonic">0%</span></li>
+              <li><span class="k">In air</span><span class="v" id="m-airborne">0%</span></li>
+            </ul>
+          </div>
+
+          <div class="section">
+            <h3>COMBAT</h3>
+            <ul class="grid">
+              <li><span class="k">Demos given</span><span class="v" id="m-demos">0</span></li>
+              <li><span class="k">Demos taken</span><span class="v" id="m-demos-taken">0</span></li>
+            </ul>
+          </div>
+        </section>
+
+        <section class="panel today">
+          <h2>TODAY</h2>
+
+          <div class="record">
+            <span class="big-stat">
+              <span class="label">W–L</span>
+              <span class="val"><span id="t-wins">0</span>–<span id="t-losses">0</span></span>
+            </span>
+            <span class="big-stat">
+              <span class="label">WIN %</span>
+              <span class="val"><span id="t-winrate">0</span>%</span>
+            </span>
+            <span class="big-stat">
+              <span class="label">MATCHES</span>
+              <span class="val" id="t-matches">0</span>
+            </span>
+          </div>
+
+          <div class="section">
+            <h3>OUTPUT</h3>
+            <ul class="grid">
+              <li><span class="k">Goals</span><span class="v" id="t-goals">0</span></li>
+              <li><span class="k">Shots <em id="t-acc">(0%)</em></span><span class="v" id="t-shots">0</span></li>
+              <li><span class="k">Saves</span><span class="v" id="t-saves">0</span></li>
+              <li><span class="k">Assists</span><span class="v" id="t-assists">0</span></li>
+              <li><span class="k">Avg score</span><span class="v" id="t-avg-score">0</span></li>
+              <li><span class="k">Best score</span><span class="v" id="t-best-score">0</span></li>
+            </ul>
+          </div>
+
+          <div class="section">
+            <h3>ACTIVITY</h3>
+            <ul class="grid">
+              <li><span class="k">Ball hits</span><span class="v" id="t-ball-hits">0</span></li>
+              <li><span class="k">Best hit</span><span class="v" id="t-best-hit">0</span></li>
+              <li><span class="k">Demos</span><span class="v" id="t-demos">0</span></li>
+              <li><span class="k">Avg boost</span><span class="v" id="t-avg-boost">0</span></li>
+              <li><span class="k">Avg supersonic</span><span class="v" id="t-avg-super">0%</span></li>
+              <li><span class="k">Win streak</span><span class="v" id="t-streak">0</span></li>
+            </ul>
+          </div>
+        </section>
+      </main>
+    </div>
+
+    <script src="/static/overlay.js"></script>
+  </body>
+</html>

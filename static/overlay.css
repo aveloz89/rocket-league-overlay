@@ -1,0 +1,205 @@
+:root {
+  --blue: #1873ff;
+  --orange: #ff8a1f;
+  --bg: rgba(10, 10, 18, 0.7);
+  --bg-soft: rgba(255, 255, 255, 0.04);
+  --fg: #f5f5f5;
+  --muted: #9ea0aa;
+  --accent: #ffd23f;
+  --good: #4ade80;
+  --bad: #ef4444;
+  --bar-empty: rgba(255, 255, 255, 0.1);
+}
+
+html, body {
+  margin: 0;
+  padding: 0;
+  background: transparent;
+  color: var(--fg);
+  font-family: "Inter", "Segoe UI", system-ui, -apple-system, sans-serif;
+  font-weight: 600;
+  user-select: none;
+  font-variant-numeric: tabular-nums;
+}
+
+[hidden] { display: none !important; }
+
+#root { padding: 14px; }
+
+#status {
+  background: var(--bg);
+  padding: 10px 14px;
+  border-radius: 8px;
+  display: inline-block;
+  color: var(--muted);
+  font-size: 14px;
+}
+
+#overlay {
+  display: grid;
+  grid-template-columns: minmax(320px, 1fr) minmax(260px, 0.8fr);
+  grid-template-rows: auto 1fr;
+  gap: 10px;
+  max-width: 780px;
+}
+
+.context {
+  grid-column: 1 / -1;
+  background: var(--bg);
+  padding: 10px 14px;
+  border-radius: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.scoreline {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  font-size: 22px;
+}
+.scoreline .team { font-size: 12px; letter-spacing: 2px; }
+.scoreline .blue { color: var(--blue); }
+.scoreline .orange { color: var(--orange); }
+.scoreline .num { font-size: 28px; min-width: 22px; text-align: center; }
+.scoreline .clock { color: var(--fg); font-size: 18px; padding: 0 8px; }
+
+.me-line {
+  display: flex;
+  justify-content: center;
+  gap: 8px;
+  color: var(--muted);
+  font-size: 12px;
+  letter-spacing: 0.5px;
+}
+.me-line #me-name { color: var(--fg); }
+.me-line .dot::before { content: "•"; color: var(--muted); }
+
+.banner {
+  align-self: center;
+  background: var(--accent);
+  color: #1a1a1a;
+  font-size: 11px;
+  letter-spacing: 2px;
+  padding: 2px 10px;
+  border-radius: 4px;
+}
+.banner.replay { background: #c084fc; color: #1a1a1a; }
+.banner.overtime { background: var(--bad); color: #fff; }
+
+.panel {
+  background: var(--bg);
+  border-radius: 10px;
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.panel h2 {
+  margin: 0;
+  font-size: 11px;
+  letter-spacing: 3px;
+  color: var(--muted);
+  font-weight: 700;
+}
+
+.section {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+.section h3 {
+  margin: 0;
+  font-size: 9px;
+  letter-spacing: 3px;
+  color: var(--accent);
+  font-weight: 700;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  padding-bottom: 3px;
+}
+
+.primary, .record {
+  display: flex;
+  gap: 10px;
+}
+
+.big-stat {
+  flex: 1;
+  background: var(--bg-soft);
+  padding: 8px 10px;
+  border-radius: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.big-stat .label {
+  font-size: 10px;
+  letter-spacing: 2px;
+  color: var(--muted);
+}
+.big-stat .val {
+  font-size: 26px;
+  font-weight: 800;
+  line-height: 1;
+}
+.big-stat.score .val { color: var(--accent); }
+.big-stat.boost .bar {
+  margin-top: 6px;
+  height: 6px;
+  background: var(--bar-empty);
+  border-radius: 3px;
+  overflow: hidden;
+}
+.big-stat.boost .fill {
+  height: 100%;
+  background: var(--accent);
+  width: 0%;
+  transition: width 120ms linear;
+}
+.big-stat.speed .val { color: var(--good); }
+.big-stat.speed .bar {
+  margin-top: 6px;
+  height: 6px;
+  background: var(--bar-empty);
+  border-radius: 3px;
+  overflow: hidden;
+}
+.big-stat.speed .fill {
+  height: 100%;
+  background: var(--good);
+  width: 0%;
+  transition: width 120ms linear;
+}
+
+.grid {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 4px 12px;
+}
+.grid li {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  padding: 4px 6px;
+  border-radius: 6px;
+  background: var(--bg-soft);
+  font-size: 13px;
+}
+.grid li.wide { grid-column: 1 / -1; }
+.grid .k { color: var(--muted); }
+.grid .k em {
+  font-style: normal;
+  color: var(--accent);
+  margin-left: 4px;
+  font-size: 11px;
+}
+.grid .v { font-weight: 800; }
+
+#m-last-touch.self { color: var(--good); }
+#m-last-touch.team { color: var(--blue); }
+#m-last-touch.opp { color: var(--bad); }
