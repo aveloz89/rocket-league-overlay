@@ -4,11 +4,25 @@ from __future__ import annotations
 
 import json
 import sqlite3
+from datetime import datetime
 from pathlib import Path
 
 CONFIG_DIR = Path.home() / ".rl-overlay"
 DB_PATH = CONFIG_DIR / "stats.db"
 CONFIG_PATH = CONFIG_DIR / "config.json"
+
+# Rolling-average window used by /coach. Tuned so a single off-day won't
+# dominate the average and so insights are stable across short sessions.
+COACH_ROLLING_WINDOW = 20
+# Minimum sample size before insights are generated. Below this the rolling
+# average is too noisy to give actionable feedback.
+COACH_INSIGHT_MIN_SAMPLES = 5
+# Trend window in days (inclusive of today).
+COACH_TREND_DAYS = 14
+# Insight thresholds — flag a metric when last-match deviates from rolling
+# avg by ≥ this much (relative) OR by ≥ this many absolute points.
+INSIGHT_REL_THRESHOLD = 0.25
+INSIGHT_ABS_THRESHOLD = 8
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS matches (
@@ -39,15 +53,37 @@ CREATE TABLE IF NOT EXISTS matches (
     avg_shot_power REAL DEFAULT 0,
     boost_wasted_pct REAL DEFAULT 0,
     possession_pct REAL DEFAULT 0,
+    score_per_min INTEGER DEFAULT 0,
+    time_def_third_pct REAL,
+    time_off_third_pct REAL,
+    behind_ball_pct REAL,
+    last_back_pct REAL,
+    dist_to_ball_avg REAL,
+    big_pads INTEGER DEFAULT 0,
+    small_pads INTEGER DEFAULT 0,
+    boost_stolen INTEGER DEFAULT 0,
+    aerial_touches INTEGER DEFAULT 0,
+    fast_aerials INTEGER DEFAULT 0,
     UNIQUE(match_guid, player_id)
 );
 """
 
-_NEW_COLUMNS = [
+_NEW_COLUMNS: list[tuple[str, str]] = [
     ("ball_hits", "INTEGER DEFAULT 0"),
     ("avg_shot_power", "REAL DEFAULT 0"),
     ("boost_wasted_pct", "REAL DEFAULT 0"),
     ("possession_pct", "REAL DEFAULT 0"),
+    ("score_per_min", "INTEGER DEFAULT 0"),
+    ("time_def_third_pct", "REAL"),
+    ("time_off_third_pct", "REAL"),
+    ("behind_ball_pct", "REAL"),
+    ("last_back_pct", "REAL"),
+    ("dist_to_ball_avg", "REAL"),
+    ("big_pads", "INTEGER DEFAULT 0"),
+    ("small_pads", "INTEGER DEFAULT 0"),
+    ("boost_stolen", "INTEGER DEFAULT 0"),
+    ("aerial_touches", "INTEGER DEFAULT 0"),
+    ("fast_aerials", "INTEGER DEFAULT 0"),
 ]
 
 
@@ -88,8 +124,14 @@ def save_match(conn: sqlite3.Connection, snapshot: dict) -> bool:
             blue_score, orange_score, me_team, won,
             score, goals, shots, saves, assists, demos, demos_taken, touches,
             boost_avg, time_zero_boost_pct, time_supersonic_pct, time_airborne_pct,
-            hardest_hit, ball_hits, avg_shot_power, boost_wasted_pct, possession_pct
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            hardest_hit, ball_hits, avg_shot_power, boost_wasted_pct, possession_pct,
+            score_per_min, time_def_third_pct, time_off_third_pct, behind_ball_pct,
+            last_back_pct, dist_to_ball_avg, big_pads, small_pads, boost_stolen,
+            aerial_touches, fast_aerials
+        ) VALUES (
+            ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+            ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+        )
         """,
         (
             snapshot["match_guid"],
@@ -118,6 +160,17 @@ def save_match(conn: sqlite3.Connection, snapshot: dict) -> bool:
             snapshot.get("avg_shot_power", 0),
             snapshot.get("boost_wasted_pct", 0),
             snapshot.get("possession_pct", 0),
+            snapshot.get("score_per_min", 0),
+            snapshot.get("time_def_third_pct"),
+            snapshot.get("time_off_third_pct"),
+            snapshot.get("behind_ball_pct"),
+            snapshot.get("last_back_pct"),
+            snapshot.get("dist_to_ball_avg"),
+            snapshot.get("big_pads", 0),
+            snapshot.get("small_pads", 0),
+            snapshot.get("boost_stolen", 0),
+            snapshot.get("aerial_touches", 0),
+            snapshot.get("fast_aerials", 0),
         ),
     )
     conn.commit()
@@ -198,6 +251,205 @@ def _current_win_streak(conn: sqlite3.Connection, player_id: str) -> int:
         else:
             break
     return streak
+
+
+# ── Coach view ───────────────────────────────────────────────────────────────
+
+
+# Insight definitions: (key, label, suffix, direction, advice).
+# direction: +1 = high is good (worse when below avg). -1 = low is good (worse when above avg).
+_INSIGHT_DEFS: list[tuple[str, str, str, int, str]] = [
+    ("shot_accuracy", "Shot accuracy", "%", 1, "más tiros con calma"),
+    ("possession_pct", "Posesión", "%", 1, "luchá más por la pelota"),
+    ("score_per_min", "Score/min", "", 1, "busca acciones de impacto"),
+    ("behind_ball_pct", "Detrás del balón", "%", 1, "estás sobreextendido"),
+    ("time_zero_boost_pct", "Sin boost", "%", -1, "recoge más pads"),
+    ("boost_wasted_pct", "Boost wasted", "%", -1, "no recargues con >50"),
+    ("aerial_touches", "Toques aéreos", "", 1, "atrévete a ir arriba"),
+]
+
+
+def _row_to_match(row: sqlite3.Row, columns: list[str]) -> dict:
+    raw = dict(zip(columns, row))
+    # Defense in depth: the WS / HTTP responses don't need to echo the platform
+    # PrimaryId back. The frontend only uses player_name. If origin checks ever
+    # leak, dropping this here narrows what an attacker can read.
+    raw.pop("player_id", None)
+    won = raw.get("won")
+    raw["won"] = None if won is None else bool(won)
+    shots = raw.get("shots") or 0
+    goals = raw.get("goals") or 0
+    raw["shot_accuracy"] = round(100 * goals / shots) if shots else 0
+    ball_hits = raw.get("ball_hits") or 0
+    aerial_touches = raw.get("aerial_touches") or 0
+    raw["air_touch_pct"] = round(100 * aerial_touches / ball_hits) if ball_hits else 0
+    raw["duration_min"] = _duration_minutes(raw.get("started_at"), raw.get("ended_at"))
+    return raw
+
+
+def _duration_minutes(started_at: str | None, ended_at: str | None) -> int:
+    if not started_at or not ended_at:
+        return 0
+    try:
+        s = datetime.fromisoformat(started_at)
+        e = datetime.fromisoformat(ended_at)
+    except ValueError:
+        return 0
+    delta = (e - s).total_seconds() / 60
+    return max(0, round(delta))
+
+
+def _last_match(conn: sqlite3.Connection, player_id: str) -> dict | None:
+    cur = conn.execute(
+        "SELECT * FROM matches WHERE player_id = ? ORDER BY ended_at DESC LIMIT 1",
+        (player_id,),
+    )
+    row = cur.fetchone()
+    if row is None:
+        return None
+    columns = [c[0] for c in cur.description]
+    return _row_to_match(row, columns)
+
+
+def _rolling_avg(
+    conn: sqlite3.Connection,
+    player_id: str,
+    exclude_id: int | None,
+    window: int = COACH_ROLLING_WINDOW,
+) -> dict:
+    cur = conn.execute(
+        """
+        SELECT
+            COUNT(*) AS count,
+            AVG(score) AS score,
+            AVG(goals) AS goals,
+            AVG(shots) AS shots,
+            AVG(saves) AS saves,
+            AVG(assists) AS assists,
+            AVG(score_per_min) AS score_per_min,
+            AVG(possession_pct) AS possession_pct,
+            AVG(boost_avg) AS boost_avg,
+            AVG(boost_wasted_pct) AS boost_wasted_pct,
+            AVG(time_zero_boost_pct) AS time_zero_boost_pct,
+            AVG(time_supersonic_pct) AS time_supersonic_pct,
+            AVG(time_airborne_pct) AS time_airborne_pct,
+            AVG(time_def_third_pct) AS time_def_third_pct,
+            AVG(time_off_third_pct) AS time_off_third_pct,
+            AVG(behind_ball_pct) AS behind_ball_pct,
+            AVG(last_back_pct) AS last_back_pct,
+            AVG(dist_to_ball_avg) AS dist_to_ball_avg,
+            AVG(big_pads) AS big_pads,
+            AVG(small_pads) AS small_pads,
+            AVG(boost_stolen) AS boost_stolen,
+            AVG(aerial_touches) AS aerial_touches,
+            AVG(fast_aerials) AS fast_aerials,
+            AVG(ball_hits) AS ball_hits
+        FROM (
+            SELECT * FROM matches
+            WHERE player_id = ?
+              AND (? IS NULL OR id != ?)
+            ORDER BY ended_at DESC
+            LIMIT ?
+        )
+        """,
+        (player_id, exclude_id, exclude_id, window),
+    )
+    row = cur.fetchone()
+    columns = [c[0] for c in cur.description]
+    raw = dict(zip(columns, row))
+    avg = {k: (round(v, 2) if isinstance(v, (int, float)) else v) for k, v in raw.items()}
+    # Synthesize shot_accuracy and air_touch_pct from the underlying averages
+    shots_avg = raw.get("shots") or 0
+    goals_avg = raw.get("goals") or 0
+    avg["shot_accuracy"] = round(100 * goals_avg / shots_avg) if shots_avg else 0
+    ball_hits_avg = raw.get("ball_hits") or 0
+    aerial_avg = raw.get("aerial_touches") or 0
+    avg["air_touch_pct"] = round(100 * aerial_avg / ball_hits_avg) if ball_hits_avg else 0
+    return avg
+
+
+def _trend_by_day(
+    conn: sqlite3.Connection, player_id: str, days: int = COACH_TREND_DAYS
+) -> list[dict]:
+    cur = conn.execute(
+        """
+        SELECT
+            date(started_at, 'localtime') AS day,
+            COUNT(*) AS matches,
+            COALESCE(SUM(CASE WHEN won = 1 THEN 1 ELSE 0 END), 0) AS wins,
+            COALESCE(SUM(goals), 0) AS goals,
+            COALESCE(SUM(shots), 0) AS shots,
+            AVG(score_per_min) AS score_per_min,
+            AVG(behind_ball_pct) AS behind_ball_pct,
+            AVG(possession_pct) AS possession_pct
+        FROM matches
+        WHERE player_id = ?
+          AND date(started_at, 'localtime') >= date('now', 'localtime', ?)
+        GROUP BY day
+        ORDER BY day ASC
+        """,
+        (player_id, f"-{days - 1} days"),
+    )
+    out: list[dict] = []
+    for row in cur.fetchall():
+        day, matches, wins, goals, shots, spm, bbp, poss = row
+        out.append({
+            "day": day,
+            "matches": matches,
+            "win_rate": round(100 * wins / matches) if matches else 0,
+            "shot_accuracy": round(100 * goals / shots) if shots else 0,
+            "score_per_min": round(spm) if spm is not None else 0,
+            "behind_ball_pct": round(bbp) if bbp is not None else None,
+            "possession_pct": round(poss) if poss is not None else None,
+        })
+    return out
+
+
+def _generate_insights(last: dict, avg: dict) -> list[str]:
+    """Return up to 3 actionable phrases comparing the latest match against the rolling avg.
+
+    Only flags metrics where last is *worse* than avg by enough magnitude to be
+    meaningful (relative ≥ INSIGHT_REL_THRESHOLD or absolute ≥ INSIGHT_ABS_THRESHOLD).
+    """
+    candidates: list[tuple[float, str]] = []
+    for key, label, suffix, direction, advice in _INSIGHT_DEFS:
+        last_v = last.get(key)
+        avg_v = avg.get(key)
+        if last_v is None or avg_v is None:
+            continue
+        diff = float(last_v) - float(avg_v)
+        worse_by = -direction * diff  # positive when last is worse than avg
+        # Treat avg=0 explicitly so the relative threshold doesn't fire on
+        # every tiny absolute deviation when the baseline is a true zero.
+        abs_avg = abs(avg_v) if avg_v != 0 else 1
+        rel = worse_by / abs_avg
+        if worse_by >= INSIGHT_ABS_THRESHOLD or rel >= INSIGHT_REL_THRESHOLD:
+            phrase = (
+                f"{label} {round(last_v)}{suffix} (avg {round(avg_v)}{suffix}) — {advice}"
+            )
+            candidates.append((worse_by, phrase))
+    candidates.sort(key=lambda x: x[0], reverse=True)
+    return [phrase for _, phrase in candidates[:3]]
+
+
+def coach_stats(conn: sqlite3.Connection, player_id: str) -> dict:
+    last = _last_match(conn, player_id)
+    exclude_id = last["id"] if last else None
+    avg = _rolling_avg(conn, player_id, exclude_id)
+    trend = _trend_by_day(conn, player_id)
+    rolling_count = avg.get("count") or 0
+    insights = (
+        _generate_insights(last, avg)
+        if last and rolling_count >= COACH_INSIGHT_MIN_SAMPLES
+        else []
+    )
+    return {
+        "last_match": last,
+        "rolling_avg": avg,
+        "trend": trend,
+        "insights": insights,
+        "today": today_stats(conn, player_id),
+    }
 
 
 def load_config() -> dict:

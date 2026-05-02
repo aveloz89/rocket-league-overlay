@@ -1,4 +1,5 @@
-"""Per-match aggregator: tracks the 15 personal stats + identity detection."""
+"""Per-match aggregator: tracks personal stats, positioning, boost pickups,
+aerials and identity detection from the RL Stats API event stream."""
 
 from __future__ import annotations
 
@@ -9,10 +10,35 @@ from datetime import datetime, timezone
 # RL "Speed" in the stats API is uu/s / 100. Supersonic in-game = 2200 uu/s.
 SUPERSONIC_THRESHOLD = 22.0
 
+# Positioning thresholds (uu, after team normalization). Field is ~10240 long on Y.
+DEFENSIVE_Y = -2000.0
+OFFENSIVE_Y = 2000.0
+
+# Boost pickup heuristics — derived from frame-to-frame delta of Player.Boost.
+# Big pads grant 100 (full); small pads grant 12. Detection windows are loose
+# because we sample at 15Hz and pads can chain.
+BIG_PAD_DELTA = 90
+BIG_PAD_PREV_MAX = 12
+SMALL_PAD_MIN_DELTA = 5
+
+# Fast-aerial detection: a takeoff with boost ≥30 that reaches Z > 600 within
+# 1.5 real seconds. Z=600 is roughly above the second crossbar height.
+FAST_AERIAL_BOOST_MIN = 30
+FAST_AERIAL_Z_TARGET = 600.0
+FAST_AERIAL_WINDOW_S = 1.5
+
 LAST_TOUCH_NONE = "none"
 LAST_TOUCH_SELF = "self"
 LAST_TOUCH_TEAM = "team"
 LAST_TOUCH_OPPONENT = "opp"
+
+
+def _norm_y(y: float, team: int) -> float:
+    """Normalize Y so that <0 is always the player's defensive half.
+
+    Blue (team=0) defends the -Y side, Orange (team=1) defends the +Y side.
+    """
+    return float(y) if team == 0 else -float(y)
 
 
 @dataclass
@@ -51,6 +77,29 @@ class MatchAggregator:
 
     # Possession: total ball-hit events per team
     team_hits: dict[int, int] = field(default_factory=lambda: {0: 0, 1: 0})
+
+    # Positioning (sampled when both player and ball expose Location).
+    # frames_pos may be < frames if the build doesn't broadcast Location.
+    frames_pos: int = 0
+    frames_def_third: int = 0
+    frames_off_third: int = 0
+    frames_behind_ball: int = 0
+    frames_last_back: int = 0
+    dist_to_ball_sum: float = 0.0
+
+    # Boost pickup detection
+    big_pads: int = 0
+    small_pads: int = 0
+    boost_stolen: int = 0
+    _prev_boost: int | None = field(default=None, repr=False)
+
+    # Aerial mechanics
+    aerial_touches: int = 0
+    fast_aerials: int = 0
+    _last_on_ground: bool = field(default=True, repr=False)
+    _takeoff_at: float | None = field(default=None, repr=False)
+    _takeoff_boost: int = field(default=0, repr=False)
+    _fast_aerial_counted: bool = field(default=False, repr=False)
 
     # Match context
     blue_score: int = 0
@@ -129,6 +178,10 @@ class MatchAggregator:
         self.boost = me.get("Boost", self.boost)
         self.speed = float(me.get("Speed", self.speed))
 
+        on_ground = me.get("bOnGround")
+        if isinstance(on_ground, bool):
+            self._last_on_ground = on_ground
+
         # Derived — only count "live" frames (not replays, has car spawned at least once)
         if not self.in_replay:
             self.frames += 1
@@ -142,13 +195,24 @@ class MatchAggregator:
             if self.speed >= SUPERSONIC_THRESHOLD:
                 self.frames_supersonic += 1
 
-            if me.get("bOnGround") is False:
+            if on_ground is False:
                 self.frames_airborne += 1
 
+            prev_has_car = self.prev_has_car
             has_car = bool(me.get("bHasCar", True))
-            if self.prev_has_car and not has_car:
+            if prev_has_car and not has_car:
                 self.demos_taken += 1
             self.prev_has_car = has_car
+
+            # Skip pickup detection on death/respawn frames — boost jumps from
+            # an arbitrary value to 0 (death) and from 0 to 33 (respawn);
+            # neither is a real pad pickup.
+            if has_car and prev_has_car:
+                self._track_boost_pickup(me, boost_now)
+            else:
+                self._prev_boost = boost_now
+            self._track_position(me, game, players)
+            self._track_aerial(me, on_ground)
 
         return detected
 
@@ -175,6 +239,9 @@ class MatchAggregator:
             self.last_touch_name = self.me_name
             if post > self.hardest_hit:
                 self.hardest_hit = post
+            # Aerial touch: I last left the ground in the most recent UpdateState
+            if self._last_on_ground is False:
+                self.aerial_touches += 1
         else:
             hitter_name = names[0] if names else ""
             hitter_team = teams.get(hitter_name)
@@ -185,6 +252,104 @@ class MatchAggregator:
             else:
                 self.last_touch_kind = LAST_TOUCH_OPPONENT
             self.last_touch_name = hitter_name
+
+    def _track_boost_pickup(self, me: dict, boost_now: int) -> None:
+        prev = self._prev_boost
+        self._prev_boost = boost_now
+        if prev is None:
+            return
+        delta = boost_now - prev
+        if delta >= BIG_PAD_DELTA and prev <= BIG_PAD_PREV_MAX:
+            self.big_pads += 1
+            if self._is_in_opponent_half(me):
+                self.boost_stolen += 1
+        elif SMALL_PAD_MIN_DELTA <= delta < BIG_PAD_DELTA:
+            self.small_pads += 1
+            if self._is_in_opponent_half(me):
+                self.boost_stolen += 1
+
+    def _is_in_opponent_half(self, me: dict) -> bool:
+        loc = me.get("Location")
+        if not isinstance(loc, dict) or self.me_team < 0:
+            return False
+        y = loc.get("Y")
+        if y is None:
+            return False
+        return _norm_y(y, self.me_team) > 0
+
+    def _track_position(self, me: dict, game: dict, players: list[dict]) -> None:
+        me_loc = me.get("Location")
+        ball = game.get("Ball") or {}
+        ball_loc = ball.get("Location")
+        if (
+            not isinstance(me_loc, dict)
+            or not isinstance(ball_loc, dict)
+            or self.me_team < 0
+            or me_loc.get("Y") is None
+            or ball_loc.get("Y") is None
+        ):
+            return
+
+        my_y = _norm_y(me_loc["Y"], self.me_team)
+        ball_y = _norm_y(ball_loc["Y"], self.me_team)
+
+        self.frames_pos += 1
+        if my_y < DEFENSIVE_Y:
+            self.frames_def_third += 1
+        elif my_y > OFFENSIVE_Y:
+            self.frames_off_third += 1
+
+        if my_y < ball_y:
+            self.frames_behind_ball += 1
+
+        # 3D distance to ball — magnitude is sign-invariant, so we can reuse
+        # the already-normalized Y values without affecting the result.
+        dx = float(me_loc.get("X", 0.0)) - float(ball_loc.get("X", 0.0))
+        dy = my_y - ball_y
+        dz = float(me_loc.get("Z", 0.0)) - float(ball_loc.get("Z", 0.0))
+        self.dist_to_ball_sum += (dx * dx + dy * dy + dz * dz) ** 0.5
+
+        # Last back: my normalized Y is the smallest among my own team
+        teammate_ys = [
+            _norm_y(p["Location"]["Y"], self.me_team)
+            for p in players
+            if isinstance(p.get("Location"), dict)
+            and p.get("Location", {}).get("Y") is not None
+            and p.get("TeamNum") == self.me_team
+        ]
+        if teammate_ys and my_y <= min(teammate_ys):
+            self.frames_last_back += 1
+
+    def _track_aerial(self, me: dict, on_ground: bool | None) -> None:
+        if on_ground is None:
+            return
+        now = time.monotonic()
+        boost_now = int(me.get("Boost", 0))
+        loc = me.get("Location")
+        z = float(loc["Z"]) if isinstance(loc, dict) and loc.get("Z") is not None else None
+
+        # Detect takeoff
+        if self.prev_has_car and on_ground is False and self._takeoff_at is None:
+            self._takeoff_at = now
+            self._takeoff_boost = boost_now
+            self._fast_aerial_counted = False
+
+        # Reset on landing
+        if on_ground is True:
+            self._takeoff_at = None
+            self._fast_aerial_counted = False
+            return
+
+        if (
+            self._takeoff_at is not None
+            and not self._fast_aerial_counted
+            and self._takeoff_boost >= FAST_AERIAL_BOOST_MIN
+            and z is not None
+            and z > FAST_AERIAL_Z_TARGET
+            and (now - self._takeoff_at) <= FAST_AERIAL_WINDOW_S
+        ):
+            self.fast_aerials += 1
+            self._fast_aerial_counted = True
 
     def _maybe_detect(self, players: list[dict], game: dict) -> dict | None:
         if self.me_id or self._detect_window_frames <= 0:
@@ -269,6 +434,32 @@ class MatchAggregator:
         total = self.team_hits.get(0, 0) + self.team_hits.get(1, 0)
         return round(100 * my_team_hits / total) if total > 0 else 0
 
+    def time_def_third_pct(self) -> int:
+        return round(100 * self.frames_def_third / self.frames_pos) if self.frames_pos > 0 else 0
+
+    def time_off_third_pct(self) -> int:
+        return round(100 * self.frames_off_third / self.frames_pos) if self.frames_pos > 0 else 0
+
+    def time_mid_third_pct(self) -> int:
+        if self.frames_pos == 0:
+            return 0
+        return max(0, 100 - self.time_def_third_pct() - self.time_off_third_pct())
+
+    def behind_ball_pct(self) -> int:
+        return round(100 * self.frames_behind_ball / self.frames_pos) if self.frames_pos > 0 else 0
+
+    def last_back_pct(self) -> int:
+        return round(100 * self.frames_last_back / self.frames_pos) if self.frames_pos > 0 else 0
+
+    def dist_to_ball_avg(self) -> int:
+        return round(self.dist_to_ball_sum / self.frames_pos) if self.frames_pos > 0 else 0
+
+    def air_touch_pct(self) -> int:
+        return round(100 * self.aerial_touches / self.ball_hits) if self.ball_hits > 0 else 0
+
+    def has_positioning_data(self) -> bool:
+        return self.frames_pos > 0
+
     def won(self) -> bool | None:
         if self.me_team < 0:
             return None
@@ -345,4 +536,15 @@ class MatchAggregator:
             "avg_shot_power": self.avg_shot_power(),
             "boost_wasted_pct": self.boost_wasted_pct(),
             "possession_pct": self.possession_pct(),
+            "score_per_min": self.score_per_minute(),
+            "time_def_third_pct": self.time_def_third_pct() if self.has_positioning_data() else None,
+            "time_off_third_pct": self.time_off_third_pct() if self.has_positioning_data() else None,
+            "behind_ball_pct": self.behind_ball_pct() if self.has_positioning_data() else None,
+            "last_back_pct": self.last_back_pct() if self.has_positioning_data() else None,
+            "dist_to_ball_avg": self.dist_to_ball_avg() if self.has_positioning_data() else None,
+            "big_pads": self.big_pads,
+            "small_pads": self.small_pads,
+            "boost_stolen": self.boost_stolen,
+            "aerial_touches": self.aerial_touches,
+            "fast_aerials": self.fast_aerials,
         }

@@ -8,13 +8,21 @@ import sys
 import time
 from contextlib import asynccontextmanager
 from pathlib import Path
+from urllib.parse import urlparse
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from state import MatchAggregator
-from storage import load_config, open_db, save_config, save_match, today_stats
+from storage import (
+    coach_stats,
+    load_config,
+    open_db,
+    save_config,
+    save_match,
+    today_stats,
+)
 from tcp_client import stream_events
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
@@ -44,6 +52,8 @@ class Hub:
     old live match snapshot.
     """
 
+    CACHED_TYPES = ("today", "coach", "match")
+
     def __init__(self) -> None:
         self._clients: set[asyncio.Queue[str]] = set()
         self._latest: dict[str, str] = {}
@@ -51,7 +61,7 @@ class Hub:
     def subscribe(self) -> asyncio.Queue[str]:
         q: asyncio.Queue[str] = asyncio.Queue(maxsize=64)
         self._clients.add(q)
-        for key in ("today", "match"):
+        for key in self.CACHED_TYPES:
             cached = self._latest.get(key)
             if cached is not None:
                 try:
@@ -66,7 +76,7 @@ class Hub:
     def publish(self, payload: dict) -> None:
         msg_type = payload.get("type")
         body = json.dumps(payload)
-        if msg_type in ("match", "today"):
+        if msg_type in self.CACHED_TYPES:
             self._latest[msg_type] = body
         for q in list(self._clients):
             try:
@@ -81,17 +91,24 @@ class Hub:
 
 # OBS Browser Source omits Origin; browsers always set it. Restrict to loopback
 # so a malicious page in the user's browser can't open a WS to read PII.
-WS_ALLOWED_ORIGINS = {
-    "http://127.0.0.1:8080",
-    "http://localhost:8080",
-    "null",
-}
+# We accept any port — the user controls --port via CLI, and same-machine origin
+# is the threat model we care about, not a specific port.
+# Note: "null" Origin is intentionally rejected. It's set by sandboxed iframes
+# (`<iframe sandbox>` without `allow-same-origin`) and `data:`/`blob:` contexts —
+# any external site can mint such an iframe and would otherwise reach this WS.
+LOOPBACK_HOSTS = frozenset({"127.0.0.1", "localhost", "::1"})
 
 
 def _origin_allowed(origin: str | None) -> bool:
-    if origin is None:
+    if origin is None:  # OBS Browser Source omits the header
         return True
-    return origin in WS_ALLOWED_ORIGINS
+    try:
+        parsed = urlparse(origin)
+    except ValueError:
+        return False
+    if parsed.scheme not in ("http", "https", "ws", "wss"):
+        return False
+    return (parsed.hostname or "") in LOOPBACK_HOSTS
 
 
 hub = Hub()
@@ -121,6 +138,14 @@ EMPTY_TODAY = {
     "total_ball_hits": 0, "best_hit": 0, "win_streak": 0,
 }
 
+EMPTY_COACH = {
+    "last_match": None,
+    "rolling_avg": {"count": 0},
+    "trend": [],
+    "insights": [],
+    "today": dict(EMPTY_TODAY),
+}
+
 
 def _broadcast_match() -> None:
     snap = agg.to_overlay_dict()
@@ -132,6 +157,13 @@ def _broadcast_today() -> None:
         hub.publish({"type": "today", "data": dict(EMPTY_TODAY)})
         return
     hub.publish({"type": "today", "data": today_stats(db, agg.me_id)})
+
+
+def _broadcast_coach() -> None:
+    if not agg.me_id or db is None:
+        hub.publish({"type": "coach", "data": dict(EMPTY_COACH)})
+        return
+    hub.publish({"type": "coach", "data": coach_stats(db, agg.me_id)})
 
 
 def _persist_current_match() -> bool:
@@ -164,6 +196,7 @@ def handle_event(event: dict) -> None:
         if agg.is_match_guid_change(data):
             _persist_current_match()
             _broadcast_today()
+            _broadcast_coach()
         detected = agg.on_update_state(data)
         if detected:
             log.info("identity detected: %s (%s)", detected["name"], detected["id"])
@@ -179,6 +212,7 @@ def handle_event(event: dict) -> None:
     if name in MATCH_END_EVENTS:
         _persist_current_match()
         _broadcast_today()
+        _broadcast_coach()
         return
 
 
@@ -204,18 +238,22 @@ async def _demo_match() -> None:  # pragma: no cover — preview-only synthetic 
     teammate = {"Name": "kuxir", "PrimaryId": "Steam|2|0", "TeamNum": 0, "Shortcut": 2}
     opp = {"Name": "jstn", "PrimaryId": "Epic|3|0", "TeamNum": 1, "Shortcut": 3}
 
-    me_state = {
-        "Name": me_name, "PrimaryId": me_id, "TeamNum": 0, "Shortcut": 1,
-        "Score": 0, "Goals": 0, "Shots": 0, "Saves": 0, "Assists": 0,
-        "Demos": 0, "Touches": 0, "CarTouches": 0,
-        "bOnGround": True, "bHasCar": True, "Speed": 0.0, "Boost": 50,
-    }
-    teammate_state = {**teammate, "Score": 0, "Goals": 0, "Shots": 0, "Saves": 0,
-                      "Assists": 0, "Demos": 0, "Touches": 0, "CarTouches": 0,
-                      "bOnGround": True, "bHasCar": True, "Speed": 0.0, "Boost": 50}
-    opp_state = {**opp, "Score": 0, "Goals": 0, "Shots": 0, "Saves": 0,
-                 "Assists": 0, "Demos": 0, "Touches": 0, "CarTouches": 0,
-                 "bOnGround": True, "bHasCar": True, "Speed": 0.0, "Boost": 50}
+    def _player_state(base: dict, **extra) -> dict:
+        return {
+            **base,
+            "Score": 0, "Goals": 0, "Shots": 0, "Saves": 0, "Assists": 0,
+            "Demos": 0, "Touches": 0, "CarTouches": 0,
+            "bOnGround": True, "bHasCar": True, "Speed": 0.0, "Boost": 50,
+            "Location": {"X": 0.0, "Y": -2000.0, "Z": 17.0},
+            **extra,
+        }
+
+    me_state = _player_state(
+        {"Name": me_name, "PrimaryId": me_id, "TeamNum": 0, "Shortcut": 1}
+    )
+    teammate_state = _player_state(teammate, Location={"X": 1500.0, "Y": -1500.0, "Z": 17.0})
+    opp_state = _player_state(opp, Location={"X": 0.0, "Y": 2000.0, "Z": 17.0})
+    ball_loc = {"X": 0.0, "Y": 0.0, "Z": 90.0}
 
     handle_event({"Event": "Initialized", "Data": {"MatchGuid": f"DEMO-{int(time.time())}"}})
 
@@ -226,12 +264,26 @@ async def _demo_match() -> None:  # pragma: no cover — preview-only synthetic 
 
     # Short demo match (real time ~20s) so the today panel populates quickly
     while elapsed < 20:
-        # Live tick: fluctuate boost, speed, ground state
+        # Live tick: fluctuate boost, speed, ground state and positioning
         for s in (me_state, teammate_state, opp_state):
-            s["Boost"] = max(0, min(100, s["Boost"] + random.randint(-7, 7)))
+            # Occasional pad pickup so big/small/stolen counters move
+            if random.random() < 0.04 and s["Boost"] <= 12:
+                s["Boost"] = 100
+            elif random.random() < 0.08:
+                s["Boost"] = min(100, s["Boost"] + 12)
+            else:
+                s["Boost"] = max(0, min(100, s["Boost"] + random.randint(-7, 4)))
             # Speed mostly below supersonic (22) so % supersonic looks realistic
             s["Speed"] = max(0.0, min(35.0, s["Speed"] * 0.6 + random.uniform(0, 20)))
             s["bOnGround"] = random.random() > 0.25
+            loc = s["Location"]
+            loc["X"] = max(-3500.0, min(3500.0, loc["X"] + random.uniform(-200, 200)))
+            loc["Y"] = max(-4500.0, min(4500.0, loc["Y"] + random.uniform(-300, 300)))
+            loc["Z"] = 17.0 if s["bOnGround"] else random.uniform(150.0, 1200.0)
+
+        ball_loc["X"] = max(-3500.0, min(3500.0, ball_loc["X"] + random.uniform(-300, 300)))
+        ball_loc["Y"] = max(-4500.0, min(4500.0, ball_loc["Y"] + random.uniform(-400, 400)))
+        ball_loc["Z"] = max(90.0, min(1500.0, ball_loc["Z"] + random.uniform(-100, 200)))
 
         update = {
             "Event": "UpdateState",
@@ -247,7 +299,11 @@ async def _demo_match() -> None:  # pragma: no cover — preview-only synthetic 
                     ],
                     "TimeSeconds": max(0, 300 - int(elapsed)),
                     "bOvertime": False,
-                    "Ball": {"Speed": random.uniform(20, 90), "TeamNum": 1},
+                    "Ball": {
+                        "Speed": random.uniform(20, 90),
+                        "TeamNum": 1,
+                        "Location": dict(ball_loc),
+                    },
                     "bReplay": False,
                     "bHasWinner": False,
                     "Winner": "",
@@ -274,7 +330,7 @@ async def _demo_match() -> None:  # pragma: no cover — preview-only synthetic 
                         "Ball": {
                             "PreHitSpeed": random.uniform(20, 60),
                             "PostHitSpeed": random.uniform(60, 110),
-                            "Location": {"X": 0, "Y": 0, "Z": 100},
+                            "Location": dict(ball_loc),
                         },
                     },
                 })
@@ -369,12 +425,24 @@ async def index() -> FileResponse:
     return FileResponse(STATIC_DIR / "index.html")
 
 
+@app.get("/coach")
+async def coach() -> FileResponse:
+    return FileResponse(STATIC_DIR / "coach.html")
+
+
 @app.get("/api/today")
 async def api_today() -> dict:
     if not agg.me_id or db is None:
         return dict(EMPTY_TODAY)
     # Run SQLite I/O in a thread so a slow disk doesn't block the event loop.
     return await asyncio.to_thread(today_stats, db, agg.me_id)
+
+
+@app.get("/api/coach")
+async def api_coach() -> dict:
+    if not agg.me_id or db is None:
+        return dict(EMPTY_COACH)
+    return await asyncio.to_thread(coach_stats, db, agg.me_id)
 
 
 @app.websocket("/ws")
