@@ -317,3 +317,96 @@ def test_match_ended_broadcasts_today_even_without_identity(fresh_state):
     cached = json.loads(app.hub._latest["today"])
     assert cached["type"] == "today"
     assert cached["data"] == app.EMPTY_TODAY
+
+
+# ── Coach broadcast and endpoint ────────────────────────────────────────────
+
+
+def test_match_ended_broadcasts_coach(fresh_state):
+    """MatchEnded should also publish a 'coach' payload so /coach refreshes live."""
+    app.agg.me_id, app.agg.me_name = "Steam|1|0", "alas"
+    app.handle_event({"Event": "Initialized", "Data": {"MatchGuid": "M1"}})
+    app.handle_event({
+        "Event": "UpdateState",
+        "Data": {
+            "MatchGuid": "M1",
+            "Players": [{"Name": "alas", "PrimaryId": "Steam|1|0", "TeamNum": 0,
+                         "Score": 250, "Goals": 1, "Shots": 2, "Saves": 0,
+                         "Assists": 0, "Demos": 0, "Touches": 5, "Boost": 50,
+                         "Speed": 0, "bOnGround": True, "bHasCar": True}],
+            "Game": {"Teams": [{"TeamNum": 0, "Score": 1}, {"TeamNum": 1, "Score": 0}],
+                     "TimeSeconds": 0, "bOvertime": False, "bReplay": False,
+                     "Arena": "stadium", "bHasTarget": False},
+        },
+    })
+    app.handle_event({"Event": "MatchEnded", "Data": {"MatchGuid": "M1"}})
+
+    cached = json.loads(app.hub._latest["coach"])
+    assert cached["type"] == "coach"
+    # The just-saved match should be the last_match in the coach payload
+    assert cached["data"]["last_match"]["match_guid"] == "M1"
+
+
+def test_match_guid_change_broadcasts_coach(fresh_state):
+    """Mid-stream match rotation also refreshes the coach payload."""
+    app.agg.me_id, app.agg.me_name = "Steam|1|0", "alas"
+
+    def state(guid):
+        return {
+            "Event": "UpdateState",
+            "Data": {
+                "MatchGuid": guid,
+                "Players": [{"Name": "alas", "PrimaryId": "Steam|1|0", "TeamNum": 0,
+                             "Score": 100, "Goals": 0, "Shots": 0, "Saves": 0,
+                             "Assists": 0, "Demos": 0, "Touches": 0, "Boost": 50,
+                             "Speed": 0, "bOnGround": True, "bHasCar": True}],
+                "Game": {"Teams": [{"TeamNum": 0, "Score": 0}, {"TeamNum": 1, "Score": 0}],
+                         "TimeSeconds": 290, "bOvertime": False, "bReplay": False,
+                         "Arena": "stadium", "bHasTarget": False},
+            },
+        }
+
+    app.handle_event(state("MATCH_A"))
+    app.handle_event(state("MATCH_B"))  # rotation triggers coach broadcast
+
+    assert "coach" in app.hub._latest
+
+
+def test_api_coach_returns_empty_when_no_identity(fresh_state):
+    app.agg.me_id = None
+    result = asyncio.run(app.api_coach())
+    assert result == app.EMPTY_COACH
+
+
+def test_api_coach_returns_data_when_identity_known(fresh_state):
+    """With an identity and saved matches, /api/coach returns the coach view."""
+    from datetime import datetime
+    app.agg.me_id, app.agg.me_name = "Steam|1|0", "alas"
+    today_iso = datetime.now().astimezone().isoformat()
+    app.db.execute(
+        "INSERT INTO matches (match_guid, player_id, started_at, ended_at, won, "
+        "score, goals, shots) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        ("M1", "Steam|1|0", today_iso, today_iso, 1, 300, 1, 2),
+    )
+    app.db.commit()
+
+    result = asyncio.run(app.api_coach())
+    assert result["last_match"]["match_guid"] == "M1"
+    assert result["today"]["matches"] == 1
+
+
+def test_hub_caches_coach_payload_for_late_subscribers():
+    """A client connecting after a coach payload was published must receive it."""
+    # Earlier asyncio.run() calls in this file close the default loop. On 3.9
+    # asyncio.Queue() needs a current loop at construction time — install a
+    # fresh one before subscribing.
+    asyncio.set_event_loop(asyncio.new_event_loop())
+    hub = app.Hub()
+    hub.publish({"type": "coach", "data": {"last_match": None, "insights": []}})
+
+    queue = hub.subscribe()
+    received = []
+    while not queue.empty():
+        received.append(json.loads(queue.get_nowait()))
+
+    assert any(m["type"] == "coach" for m in received)

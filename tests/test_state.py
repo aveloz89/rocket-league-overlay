@@ -290,3 +290,319 @@ def test_first_event_without_initialized_still_inits_match():
     assert agg.match_guid == "M1"
     assert agg.started_at is not None
     assert agg.frames == 1
+
+
+# ── Positioning ─────────────────────────────────────────────────────────────
+
+
+def make_state_with_locations(
+    *, me_y, ball_y, me_team=0, me_x=0.0, me_z=17.0,
+    ball_x=0.0, ball_z=90.0, teammate_y=None,
+):
+    """Build an UpdateState with Location data for both player and ball."""
+    me = {
+        "Name": "alas", "PrimaryId": "Steam|1|0", "TeamNum": me_team,
+        "Score": 100, "Goals": 0, "Shots": 0, "Saves": 0, "Assists": 0,
+        "Demos": 0, "Touches": 0, "Boost": 50, "Speed": 0,
+        "bOnGround": True, "bHasCar": True,
+        "Location": {"X": me_x, "Y": me_y, "Z": me_z},
+    }
+    players = [me]
+    if teammate_y is not None:
+        players.append({
+            "Name": "kuxir", "PrimaryId": "Steam|2|0", "TeamNum": me_team,
+            "Score": 0, "Goals": 0, "Shots": 0, "Saves": 0, "Assists": 0,
+            "Demos": 0, "Touches": 0, "Boost": 50, "Speed": 0,
+            "bOnGround": True, "bHasCar": True,
+            "Location": {"X": 1500.0, "Y": teammate_y, "Z": 17.0},
+        })
+    return {
+        "MatchGuid": "M1",
+        "Players": players,
+        "Game": {
+            "Teams": [{"TeamNum": 0, "Score": 0}, {"TeamNum": 1, "Score": 0}],
+            "TimeSeconds": 240, "bOvertime": False, "bReplay": False,
+            "Arena": "stadium", "bHasTarget": False,
+            "Ball": {"Speed": 0, "Location": {"X": ball_x, "Y": ball_y, "Z": ball_z}},
+        },
+    }
+
+
+def test_positioning_def_off_thirds_for_blue_team():
+    agg = MatchAggregator()
+    agg.me_id, agg.me_name = "Steam|1|0", "alas"
+    agg.me_team = 0  # Blue defends -Y
+    agg.on_initialized({"MatchGuid": "M1"})
+
+    # Blue team — defensive third is Y < -2000, offensive Y > 2000
+    for me_y in (-3000, -3000, 0, 3000):  # 2 def, 1 mid, 1 off
+        agg.on_update_state(make_state_with_locations(me_y=me_y, ball_y=0))
+
+    assert agg.frames_pos == 4
+    assert agg.time_def_third_pct() == 50
+    assert agg.time_off_third_pct() == 25
+    assert agg.time_mid_third_pct() == 25
+
+
+def test_positioning_mirrors_for_orange_team():
+    """Orange defends +Y, so Y=+3000 should count as defensive for them."""
+    agg = MatchAggregator()
+    agg.me_id, agg.me_name = "Steam|1|0", "alas"
+    agg.me_team = 1
+    agg.on_initialized({"MatchGuid": "M1"})
+
+    for me_y in (3000, 3000, 0, -3000):
+        agg.on_update_state(make_state_with_locations(me_y=me_y, ball_y=0, me_team=1))
+
+    assert agg.time_def_third_pct() == 50
+    assert agg.time_off_third_pct() == 25
+
+
+def test_behind_ball_pct():
+    agg = MatchAggregator()
+    agg.me_id, agg.me_name = "Steam|1|0", "alas"
+    agg.me_team = 0
+    agg.on_initialized({"MatchGuid": "M1"})
+
+    # Blue team: "behind ball" means me_y < ball_y (more negative = more defensive)
+    for me_y, ball_y in ((-3000, -1000), (-2000, -1000), (1000, 0), (-500, 500)):
+        agg.on_update_state(make_state_with_locations(me_y=me_y, ball_y=ball_y))
+
+    # 3 of 4 frames have me_y < ball_y
+    assert agg.behind_ball_pct() == 75
+
+
+def test_dist_to_ball_avg():
+    agg = MatchAggregator()
+    agg.me_id, agg.me_name = "Steam|1|0", "alas"
+    agg.me_team = 0
+    agg.on_initialized({"MatchGuid": "M1"})
+
+    # Place me at (0,0,0) and ball at (0, dist, 0) so dist == |dy|
+    for dist in (1000, 2000, 3000):
+        agg.on_update_state(make_state_with_locations(
+            me_y=0, ball_y=dist, me_z=0, ball_z=0,
+        ))
+
+    assert agg.dist_to_ball_avg() == 2000
+
+
+def test_last_back_pct_with_teammate():
+    agg = MatchAggregator()
+    agg.me_id, agg.me_name = "Steam|1|0", "alas"
+    agg.me_team = 0
+    agg.on_initialized({"MatchGuid": "M1"})
+
+    # me deeper than teammate → last back
+    agg.on_update_state(make_state_with_locations(me_y=-3000, ball_y=0, teammate_y=-1000))
+    # teammate deeper than me → not last back
+    agg.on_update_state(make_state_with_locations(me_y=-1000, ball_y=0, teammate_y=-3000))
+
+    assert agg.last_back_pct() == 50
+
+
+def test_positioning_unchanged_when_no_location():
+    """If the API doesn't expose Location, positioning counters stay at zero
+    and pct accessors return 0 rather than crashing."""
+    agg = MatchAggregator()
+    agg.me_id, agg.me_name = "Steam|1|0", "alas"
+    agg.on_initialized({"MatchGuid": "M1"})
+
+    for _ in range(5):
+        agg.on_update_state(make_state())  # no Location field
+
+    assert agg.frames_pos == 0
+    assert agg.time_def_third_pct() == 0
+    assert agg.behind_ball_pct() == 0
+    assert agg.has_positioning_data() is False
+
+
+# ── Boost pickup detection ──────────────────────────────────────────────────
+
+
+def test_big_pad_detected_from_zero_to_full_boost():
+    agg = MatchAggregator()
+    agg.me_id, agg.me_name = "Steam|1|0", "alas"
+    agg.on_initialized({"MatchGuid": "M1"})
+
+    # 0 → 100 jump qualifies as big pad pickup
+    agg.on_update_state(make_state(me_boost=0))
+    agg.on_update_state(make_state(me_boost=100))
+    assert agg.big_pads == 1
+    assert agg.small_pads == 0
+
+
+def test_small_pad_detected_from_modest_increment():
+    agg = MatchAggregator()
+    agg.me_id, agg.me_name = "Steam|1|0", "alas"
+    agg.on_initialized({"MatchGuid": "M1"})
+
+    # 50 → 62 (delta 12) qualifies as small pad
+    agg.on_update_state(make_state(me_boost=50))
+    agg.on_update_state(make_state(me_boost=62))
+    assert agg.small_pads == 1
+    assert agg.big_pads == 0
+
+
+def test_no_pad_for_natural_consumption():
+    """Decreasing boost (consumption) must not be classified as a pickup."""
+    agg = MatchAggregator()
+    agg.me_id, agg.me_name = "Steam|1|0", "alas"
+    agg.on_initialized({"MatchGuid": "M1"})
+
+    for boost in (100, 80, 60, 40, 20, 0):
+        agg.on_update_state(make_state(me_boost=boost))
+
+    assert agg.big_pads == 0
+    assert agg.small_pads == 0
+
+
+def test_boost_stolen_detected_in_opponent_half():
+    """A pickup at Y > 0 (after team mirror) is counted as stolen."""
+    agg = MatchAggregator()
+    agg.me_id, agg.me_name = "Steam|1|0", "alas"
+    agg.me_team = 0
+    agg.on_initialized({"MatchGuid": "M1"})
+
+    # Pickup in own half (Y < 0): not stolen.
+    # First frame seeds prev_boost=10, second frame jumps to 100 → big pad.
+    s_low = make_state_with_locations(me_y=-1000, ball_y=0)
+    s_low["Players"][0]["Boost"] = 10
+    agg.on_update_state(s_low)
+    s_full = make_state_with_locations(me_y=-1000, ball_y=0)
+    s_full["Players"][0]["Boost"] = 100
+    agg.on_update_state(s_full)
+    assert agg.big_pads == 1
+    assert agg.boost_stolen == 0
+
+    # Pickup in opponent half: stolen.
+    s2 = make_state_with_locations(me_y=2000, ball_y=0)
+    s2["Players"][0]["Boost"] = 5
+    agg.on_update_state(s2)
+    s3 = make_state_with_locations(me_y=2000, ball_y=0)
+    s3["Players"][0]["Boost"] = 100
+    agg.on_update_state(s3)
+    assert agg.boost_stolen == 1
+
+
+# ── Aerials ─────────────────────────────────────────────────────────────────
+
+
+def test_aerial_touch_counted_when_ball_hit_while_airborne():
+    agg = MatchAggregator()
+    agg.me_id, agg.me_name = "Steam|1|0", "alas"
+    agg.me_team = 0
+
+    # First frame establishes me as airborne
+    agg.on_update_state(make_state(me_on_ground=False))
+    agg.on_ball_hit({
+        "Players": [{"Name": "alas", "TeamNum": 0}],
+        "Ball": {"PostHitSpeed": 80},
+    })
+    assert agg.aerial_touches == 1
+    assert agg.ball_hits == 1
+
+    # Now grounded — next ball hit is not aerial
+    agg.on_update_state(make_state(me_on_ground=True))
+    agg.on_ball_hit({
+        "Players": [{"Name": "alas", "TeamNum": 0}],
+        "Ball": {"PostHitSpeed": 50},
+    })
+    assert agg.aerial_touches == 1
+    assert agg.ball_hits == 2
+
+
+def test_air_touch_pct():
+    agg = MatchAggregator()
+    agg.me_id, agg.me_name = "Steam|1|0", "alas"
+    agg.me_team = 0
+
+    agg.on_update_state(make_state(me_on_ground=False))
+    for _ in range(3):
+        agg.on_ball_hit({
+            "Players": [{"Name": "alas", "TeamNum": 0}],
+            "Ball": {"PostHitSpeed": 50},
+        })
+    agg.on_update_state(make_state(me_on_ground=True))
+    for _ in range(2):
+        agg.on_ball_hit({
+            "Players": [{"Name": "alas", "TeamNum": 0}],
+            "Ball": {"PostHitSpeed": 50},
+        })
+
+    # 3 aerial of 5 total
+    assert agg.air_touch_pct() == 60
+
+
+def test_fast_aerial_counted_when_takeoff_with_boost_reaches_high_z(monkeypatch):
+    import state as state_module
+    fake_now = [1000.0]
+    monkeypatch.setattr(state_module.time, "monotonic", lambda: fake_now[0])
+
+    agg = MatchAggregator()
+    agg.me_id, agg.me_name = "Steam|1|0", "alas"
+    agg.on_initialized({"MatchGuid": "M1"})
+
+    # On ground with full boost
+    s_ground = make_state_with_locations(me_y=0, ball_y=0, me_z=17.0)
+    s_ground["Players"][0]["Boost"] = 50
+    agg.on_update_state(s_ground)
+
+    # Takeoff
+    fake_now[0] = 1000.5
+    s_air = make_state_with_locations(me_y=0, ball_y=0, me_z=200.0)
+    s_air["Players"][0]["Boost"] = 50
+    s_air["Players"][0]["bOnGround"] = False
+    agg.on_update_state(s_air)
+
+    # Reaches high Z within window
+    fake_now[0] = 1001.5
+    s_high = make_state_with_locations(me_y=0, ball_y=0, me_z=900.0)
+    s_high["Players"][0]["Boost"] = 30
+    s_high["Players"][0]["bOnGround"] = False
+    agg.on_update_state(s_high)
+
+    assert agg.fast_aerials == 1
+
+
+def test_fast_aerial_not_counted_when_takeoff_boost_too_low(monkeypatch):
+    import state as state_module
+    fake_now = [1000.0]
+    monkeypatch.setattr(state_module.time, "monotonic", lambda: fake_now[0])
+
+    agg = MatchAggregator()
+    agg.me_id, agg.me_name = "Steam|1|0", "alas"
+    agg.on_initialized({"MatchGuid": "M1"})
+
+    s_ground = make_state_with_locations(me_y=0, ball_y=0, me_z=17.0)
+    s_ground["Players"][0]["Boost"] = 10  # below FAST_AERIAL_BOOST_MIN
+    agg.on_update_state(s_ground)
+
+    fake_now[0] = 1000.5
+    s_air = make_state_with_locations(me_y=0, ball_y=0, me_z=900.0)
+    s_air["Players"][0]["Boost"] = 5
+    s_air["Players"][0]["bOnGround"] = False
+    agg.on_update_state(s_air)
+
+    assert agg.fast_aerials == 0
+
+
+# ── DB snapshot exposes new fields ──────────────────────────────────────────
+
+
+def test_db_snapshot_includes_new_fields():
+    agg = MatchAggregator()
+    agg.me_id, agg.me_name = "Steam|1|0", "alas"
+    agg.me_team = 0
+    agg.on_initialized({"MatchGuid": "M1"})
+    agg.on_update_state(make_state_with_locations(me_y=-3000, ball_y=0))
+
+    snap = agg.to_db_snapshot()
+    assert "time_def_third_pct" in snap
+    assert "behind_ball_pct" in snap
+    assert "big_pads" in snap
+    assert "aerial_touches" in snap
+    assert "fast_aerials" in snap
+    assert "score_per_min" in snap
+    # With Location present, positioning is captured (not None)
+    assert snap["time_def_third_pct"] == 100  # all frames in def third

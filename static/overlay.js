@@ -46,13 +46,6 @@
     $("me-team").style.color = me.team === 0 ? "#1873ff" : me.team === 1 ? "#ff8a1f" : "";
 
     $("m-score").textContent = m.score ?? 0;
-    $("m-boost").textContent = m.boost ?? 0;
-    $("m-boost-fill").style.width = `${Math.max(0, Math.min(100, m.boost ?? 0))}%`;
-
-    const speed = m.speed ?? 0;
-    $("m-speed").textContent = speed;
-    // Supersonic threshold = 22 in API speed units
-    $("m-speed-fill").style.width = `${Math.max(0, Math.min(100, (speed / 22) * 100))}%`;
 
     $("m-goals").textContent = m.goals ?? 0;
     $("m-shots").textContent = m.shots ?? 0;
