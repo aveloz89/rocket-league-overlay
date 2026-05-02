@@ -7,6 +7,11 @@ log = logging.getLogger(__name__)
 
 EventHandler = Callable[[dict], Awaitable[None]]
 
+# A single Stats API event fits comfortably under ~10 KB. Cap at 1 MB to bound
+# memory if a misbehaving (or malicious) source on the local TCP port sends
+# data without newlines.
+MAX_LINE_BYTES = 1_000_000
+
 
 def split_json_lines(buffer: bytes) -> tuple[list[dict], bytes]:
     """Split a TCP buffer into JSON objects, returning leftover bytes.
@@ -18,6 +23,9 @@ def split_json_lines(buffer: bytes) -> tuple[list[dict], bytes]:
     while True:
         nl = buffer.find(b"\n")
         if nl == -1:
+            if len(buffer) > MAX_LINE_BYTES:
+                log.warning("line buffer exceeded %d bytes without newline — dropping", MAX_LINE_BYTES)
+                return events, b""
             return events, buffer
         line = buffer[:nl].strip()
         buffer = buffer[nl + 1 :]

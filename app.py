@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import asyncio
 import json
 import logging
@@ -34,28 +36,38 @@ MATCH_END_EVENTS = {"MatchEnded", "PodiumStart"}
 
 
 class Hub:
-    """Fan-out broadcaster for the per-frame snapshot the overlay consumes."""
+    """Fan-out broadcaster.
+
+    Caches the latest payload per message type (`match` / `today`) so a fresh
+    subscriber gets the full picture on connect. Replays in a stable order
+    (today first, then match) so the today panel never gets clobbered by an
+    old live match snapshot.
+    """
 
     def __init__(self) -> None:
         self._clients: set[asyncio.Queue[str]] = set()
-        self._latest: str | None = None
+        self._latest: dict[str, str] = {}
 
     def subscribe(self) -> asyncio.Queue[str]:
         q: asyncio.Queue[str] = asyncio.Queue(maxsize=64)
         self._clients.add(q)
-        if self._latest is not None:
-            try:
-                q.put_nowait(self._latest)
-            except asyncio.QueueFull:
-                pass
+        for key in ("today", "match"):
+            cached = self._latest.get(key)
+            if cached is not None:
+                try:
+                    q.put_nowait(cached)
+                except asyncio.QueueFull:
+                    pass
         return q
 
     def unsubscribe(self, q: asyncio.Queue[str]) -> None:
         self._clients.discard(q)
 
     def publish(self, payload: dict) -> None:
+        msg_type = payload.get("type")
         body = json.dumps(payload)
-        self._latest = body
+        if msg_type in ("match", "today"):
+            self._latest[msg_type] = body
         for q in list(self._clients):
             try:
                 q.put_nowait(body)
@@ -65,6 +77,21 @@ class Hub:
                     q.put_nowait(body)
                 except asyncio.QueueEmpty:
                     pass
+
+
+# OBS Browser Source omits Origin; browsers always set it. Restrict to loopback
+# so a malicious page in the user's browser can't open a WS to read PII.
+WS_ALLOWED_ORIGINS = {
+    "http://127.0.0.1:8080",
+    "http://localhost:8080",
+    "null",
+}
+
+
+def _origin_allowed(origin: str | None) -> bool:
+    if origin is None:
+        return True
+    return origin in WS_ALLOWED_ORIGINS
 
 
 hub = Hub()
@@ -86,6 +113,15 @@ def _persist_identity() -> None:
     save_config(cfg)
 
 
+EMPTY_TODAY = {
+    "matches": 0, "wins": 0, "losses": 0, "win_rate": 0,
+    "goals": 0, "shots": 0, "shot_accuracy": 0, "saves": 0, "assists": 0,
+    "demos": 0, "demos_taken": 0, "touches": 0,
+    "avg_score": 0, "best_score": 0, "avg_boost": 0, "avg_supersonic_pct": 0,
+    "total_ball_hits": 0, "best_hit": 0, "win_streak": 0,
+}
+
+
 def _broadcast_match() -> None:
     snap = agg.to_overlay_dict()
     hub.publish({"type": "match", "data": snap})
@@ -93,8 +129,20 @@ def _broadcast_match() -> None:
 
 def _broadcast_today() -> None:
     if not agg.me_id or db is None:
+        hub.publish({"type": "today", "data": dict(EMPTY_TODAY)})
         return
     hub.publish({"type": "today", "data": today_stats(db, agg.me_id)})
+
+
+def _persist_current_match() -> bool:
+    """Persist the current match if we have enough info. Returns True on insert."""
+    if db is None:
+        return False
+    snap = agg.to_db_snapshot()
+    if save_match(db, snap):
+        log.info("saved match %s (won=%s)", snap["match_guid"], snap["won"])
+        return True
+    return False
 
 
 def handle_event(event: dict) -> None:
@@ -102,11 +150,20 @@ def handle_event(event: dict) -> None:
     data = event.get("Data") or {}
 
     if name == "Initialized":
+        # If a previous match was in progress and never sent MatchEnded, persist
+        # it before resetting the aggregator.
+        if agg.match_guid:
+            _persist_current_match()
         agg.on_initialized(data)
         _broadcast_match()
         return
 
     if name == "UpdateState":
+        # Same defense for the case where the game rotates MatchGuid without
+        # an Initialized event (e.g. spectator transitions).
+        if agg.is_match_guid_change(data):
+            _persist_current_match()
+            _broadcast_today()
         detected = agg.on_update_state(data)
         if detected:
             log.info("identity detected: %s (%s)", detected["name"], detected["id"])
@@ -120,9 +177,7 @@ def handle_event(event: dict) -> None:
         return
 
     if name in MATCH_END_EVENTS:
-        snap = agg.to_db_snapshot()
-        if db is not None and save_match(db, snap):
-            log.info("saved match %s (won=%s)", snap["match_guid"], snap["won"])
+        _persist_current_match()
         _broadcast_today()
         return
 
@@ -135,11 +190,15 @@ async def tcp_pump(host: str, port: int) -> None:
             if now - last_update < UPDATE_STATE_MIN_INTERVAL:
                 continue
             last_update = now
-        handle_event(event)
+        try:
+            handle_event(event)
+        except (KeyError, TypeError, ValueError, AttributeError) as exc:
+            # A single malformed event must not kill the pump task. Log and continue.
+            log.warning("dropped event due to handler error: %s — payload=%r", exc, event)
 
 
-async def demo_pump() -> None:
-    """Synthesize a realistic match flow so the overlay can be previewed without RL."""
+async def _demo_match() -> None:  # pragma: no cover — preview-only synthetic events
+    """Run one synthetic demo match. Returns when MatchEnded is fired."""
     me_id = "Steam|76561197960409023|0"
     me_name = "alas"
     teammate = {"Name": "kuxir", "PrimaryId": "Steam|2|0", "TeamNum": 0, "Shortcut": 2}
@@ -262,13 +321,17 @@ async def demo_pump() -> None:
         elapsed += 1 / 15
 
     handle_event({"Event": "MatchEnded", "Data": {"MatchGuid": agg.match_guid}})
-    # Loop forever for the demo
-    await asyncio.sleep(2)
-    await demo_pump()
+
+
+async def demo_pump() -> None:  # pragma: no cover — preview-only entry point
+    """Run demo matches in a loop. Iterative to avoid stack growth."""
+    while True:
+        await _demo_match()
+        await asyncio.sleep(2)
 
 
 @asynccontextmanager
-async def lifespan(app: FastAPI):
+async def lifespan(app: FastAPI):  # pragma: no cover — exercised via uvicorn at runtime
     global db
     db = open_db()
     _apply_config_identity()
@@ -309,22 +372,24 @@ async def index() -> FileResponse:
 @app.get("/api/today")
 async def api_today() -> dict:
     if not agg.me_id or db is None:
-        return {"matches": 0}
-    return today_stats(db, agg.me_id)
+        return dict(EMPTY_TODAY)
+    # Run SQLite I/O in a thread so a slow disk doesn't block the event loop.
+    return await asyncio.to_thread(today_stats, db, agg.me_id)
 
 
 @app.websocket("/ws")
 async def ws(websocket: WebSocket) -> None:
+    if not _origin_allowed(websocket.headers.get("origin")):
+        await websocket.close(code=1008)
+        return
     await websocket.accept()
     queue = hub.subscribe()
-    # Push today's stats on connect so the panel is filled in immediately
-    if agg.me_id and db is not None:
-        await websocket.send_text(json.dumps({"type": "today", "data": today_stats(db, agg.me_id)}))
     try:
         while True:
             payload = await queue.get()
-            await websocket.send_text(payload)
-    except WebSocketDisconnect:
+            # Bound the send so a stuck/slow client can't block us indefinitely.
+            await asyncio.wait_for(websocket.send_text(payload), timeout=5.0)
+    except (WebSocketDisconnect, asyncio.TimeoutError):
         pass
     finally:
         hub.unsubscribe(queue)
@@ -363,7 +428,7 @@ def _install_rl_stats_ini() -> bool:
     return True
 
 
-def _open_browser_when_ready(url: str) -> None:
+def _open_browser_when_ready(url: str) -> None:  # pragma: no cover — threading + webbrowser
     """Open the user's browser shortly after uvicorn binds the port."""
     import threading
     import webbrowser
@@ -400,6 +465,13 @@ if __name__ == "__main__":
 
     if not args.demo and not args.no_ini_setup and sys.platform == "win32":
         _install_rl_stats_ini()
+
+    if args.host not in ("127.0.0.1", "localhost"):
+        log.warning("=" * 60)
+        log.warning(" Binding to %s — overlay (incl. PrimaryId) will be reachable", args.host)
+        log.warning(" from your LAN. There is no auth. Use 127.0.0.1 unless you")
+        log.warning(" really need remote access.")
+        log.warning("=" * 60)
 
     if not args.no_browser:
         _open_browser_when_ready(f"http://{args.host}:{args.port}")

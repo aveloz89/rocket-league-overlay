@@ -53,6 +53,18 @@ def test_split_skips_empty_lines():
     assert len(events) == 2
 
 
+def test_split_drops_buffer_when_exceeds_max_line_size():
+    """If the source sends a huge blob without a newline, we drop it instead of
+    growing the buffer unbounded."""
+    from tcp_client import MAX_LINE_BYTES
+
+    huge = b"x" * (MAX_LINE_BYTES + 100)
+    events, leftover = split_json_lines(huge)
+
+    assert events == []
+    assert leftover == b""
+
+
 def test_stream_events_yields_from_fake_server():
     sample = {"Event": "UpdateState", "Data": {"MatchGuid": "abc"}}
 
