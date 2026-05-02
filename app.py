@@ -90,17 +90,22 @@ class Hub:
 
 # OBS Browser Source omits Origin; browsers always set it. Restrict to loopback
 # so a malicious page in the user's browser can't open a WS to read PII.
-WS_ALLOWED_ORIGINS = {
-    "http://127.0.0.1:8080",
-    "http://localhost:8080",
-    "null",
-}
+# We accept any port — the user controls --port via CLI, and same-machine origin
+# is the threat model we care about, not a specific port.
+LOOPBACK_HOSTS = frozenset({"127.0.0.1", "localhost", "::1", "[::1]"})
 
 
 def _origin_allowed(origin: str | None) -> bool:
-    if origin is None:
+    if origin is None or origin == "null":
         return True
-    return origin in WS_ALLOWED_ORIGINS
+    from urllib.parse import urlparse
+    try:
+        parsed = urlparse(origin)
+    except ValueError:
+        return False
+    if parsed.scheme not in ("http", "https", "ws", "wss"):
+        return False
+    return (parsed.hostname or "") in LOOPBACK_HOSTS
 
 
 hub = Hub()

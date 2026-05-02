@@ -86,9 +86,25 @@ def test_origin_allowed_loopback_and_obs():
     assert app._origin_allowed(None) is True
 
 
+def test_origin_allowed_any_port_on_loopback():
+    """The user picks --port at runtime; the WS check must follow."""
+    assert app._origin_allowed("http://127.0.0.1:8765") is True
+    assert app._origin_allowed("http://127.0.0.1:3000") is True
+    assert app._origin_allowed("http://localhost:9999") is True
+    assert app._origin_allowed("http://[::1]:8080") is True
+
+
 def test_origin_allowed_rejects_external():
     assert app._origin_allowed("https://evil.example.com") is False
     assert app._origin_allowed("http://192.168.1.10:8080") is False
+    # LAN addresses must stay rejected even on the default port
+    assert app._origin_allowed("http://10.0.0.5:8080") is False
+
+
+def test_origin_allowed_rejects_malformed_or_unknown_scheme():
+    assert app._origin_allowed("not-a-url") is False
+    assert app._origin_allowed("file:///etc/passwd") is False
+    assert app._origin_allowed("javascript:alert(1)") is False
 
 
 # ── handle_event ─────────────────────────────────────────────────────────────
