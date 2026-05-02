@@ -61,7 +61,11 @@ def _migrate(conn: sqlite3.Connection) -> None:
 
 def open_db(path: Path = DB_PATH) -> sqlite3.Connection:
     path.parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(str(path))
+    # check_same_thread=False so the same connection can be used from the event
+    # loop and from threads spawned via asyncio.to_thread for read-only queries.
+    # WAL mode + the "writes only from the event loop, reads may be threaded"
+    # convention keep this safe in practice.
+    conn = sqlite3.connect(str(path), check_same_thread=False)
     conn.execute("PRAGMA journal_mode=WAL")
     conn.executescript(_SCHEMA)
     _migrate(conn)
@@ -70,6 +74,10 @@ def open_db(path: Path = DB_PATH) -> sqlite3.Connection:
 
 def save_match(conn: sqlite3.Connection, snapshot: dict) -> bool:
     if not snapshot.get("match_guid") or not snapshot.get("player_id"):
+        return False
+    # started_at is NOT NULL in the schema — without this guard the INSERT raises
+    # IntegrityError, which would crash the event-loop task that owns the call.
+    if not snapshot.get("started_at"):
         return False
     won = snapshot.get("won")
     won_int = None if won is None else (1 if won else 0)
@@ -172,7 +180,8 @@ def today_stats(conn: sqlite3.Connection, player_id: str) -> dict:
 
 
 def _current_win_streak(conn: sqlite3.Connection, player_id: str) -> int:
-    """Consecutive wins from the most recent match, today only."""
+    """Consecutive wins from the most recent match, today only.
+    Both losses and draws (won = NULL) break the streak."""
     cur = conn.execute(
         """
         SELECT won FROM matches

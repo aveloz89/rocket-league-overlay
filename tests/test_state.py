@@ -235,3 +235,58 @@ def test_speed_exposed_in_overlay_dict():
 
     out = agg.to_overlay_dict()
     assert out["match"]["speed"] == 18.5
+
+
+def test_score_per_minute_uses_real_elapsed_time(monkeypatch):
+    """score_per_min should track wall time since match start, not the in-game clock."""
+    import state as state_module
+
+    fake_now = [1000.0]
+    monkeypatch.setattr(state_module.time, "monotonic", lambda: fake_now[0])
+
+    agg = MatchAggregator()
+    agg.me_id, agg.me_name = "Steam|1|0", "alas"
+    agg.on_initialized({"MatchGuid": "M1"})  # started_monotonic = 1000.0
+
+    # 60 seconds (1 min) elapsed, score 200 → 200/min
+    fake_now[0] = 1060.0
+    state = make_state()
+    state["Players"][0]["Score"] = 200
+    agg.on_update_state(state)
+
+    assert agg.score_per_minute() == 200
+
+
+def test_score_per_minute_zero_until_first_frame(monkeypatch):
+    import state as state_module
+
+    monkeypatch.setattr(state_module.time, "monotonic", lambda: 1000.0)
+    agg = MatchAggregator()
+    agg.me_id, agg.me_name = "Steam|1|0", "alas"
+    agg.on_initialized({"MatchGuid": "M1"})
+
+    # No frames seen yet
+    assert agg.score_per_minute() == 0
+
+
+def test_is_match_guid_change_detects_rotation():
+    agg = MatchAggregator()
+    agg.on_initialized({"MatchGuid": "M1"})
+
+    assert agg.is_match_guid_change({"MatchGuid": "M1"}) is False
+    assert agg.is_match_guid_change({"MatchGuid": "M2"}) is True
+    # Empty/missing guid is not a change
+    assert agg.is_match_guid_change({}) is False
+    assert agg.is_match_guid_change({"MatchGuid": ""}) is False
+
+
+def test_first_event_without_initialized_still_inits_match():
+    """If we join mid-stream and the first event is an UpdateState, the aggregator
+    should still set up the match guid and start tracking."""
+    agg = MatchAggregator()
+    agg.me_id, agg.me_name = "Steam|1|0", "alas"
+    agg.on_update_state(make_state())
+
+    assert agg.match_guid == "M1"
+    assert agg.started_at is not None
+    assert agg.frames == 1

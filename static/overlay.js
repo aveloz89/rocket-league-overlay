@@ -40,7 +40,7 @@
       banner.hidden = true;
     }
 
-    $("me-name").textContent = me.name || "detecting…";
+    $("me-name").textContent = me.name ?? "detecting…";
     const teamLabel = me.team === 0 ? "blue team" : me.team === 1 ? "orange team" : "—";
     $("me-team").textContent = teamLabel;
     $("me-team").style.color = me.team === 0 ? "#1873ff" : me.team === 1 ? "#ff8a1f" : "";
@@ -74,15 +74,16 @@
     $("m-hardest").textContent = m.hardest_hit ?? 0;
     $("m-avg-shot-pwr").textContent = m.avg_shot_power ?? 0;
 
-    const lastTouch = m.last_touch || "none";
+    const ALLOWED_TOUCH = { self: "you", team: "teammate", opp: "opponent", none: null };
+    const rawTouch = m.last_touch;
+    const touchKey = Object.prototype.hasOwnProperty.call(ALLOWED_TOUCH, rawTouch) ? rawTouch : "none";
     const last = $("m-last-touch");
-    last.className = lastTouch;
-    if (lastTouch === "none") {
+    last.className = touchKey === "none" ? "" : touchKey;
+    if (touchKey === "none") {
       last.textContent = "—";
     } else {
-      const labels = { self: "you", team: "teammate", opp: "opponent" };
       const who = m.last_touch_name ? ` (${m.last_touch_name})` : "";
-      last.textContent = `${labels[lastTouch] || lastTouch}${who}`;
+      last.textContent = `${ALLOWED_TOUCH[touchKey]}${who}`;
     }
   };
 
@@ -116,14 +117,23 @@
       setStatus("connected — waiting for match…");
     };
     socket.onmessage = (evt) => {
-      const msg = JSON.parse(evt.data);
-      if (msg.type === "match") renderMatch(msg.data);
-      else if (msg.type === "today") renderToday(msg.data);
+      let msg;
+      try {
+        msg = JSON.parse(evt.data);
+      } catch (err) {
+        console.warn("overlay: dropped malformed WS message", err);
+        return;
+      }
+      if (!msg || typeof msg !== "object") return;
+      if (msg.type === "match" && msg.data) renderMatch(msg.data);
+      else if (msg.type === "today" && msg.data) renderToday(msg.data);
     };
     socket.onclose = () => {
       setStatus("disconnected — retrying…");
       setTimeout(connect, retryDelay);
-      retryDelay = Math.min(retryDelay * 2, 5000);
+      // Cap at 30s so an overlay left running through a long server outage
+      // doesn't keep hammering once a second after the cap.
+      retryDelay = Math.min(retryDelay * 2, 30000);
     };
     socket.onerror = () => socket.close();
   };

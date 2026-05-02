@@ -1,0 +1,14 @@
+[run]
+source = app, state, storage, tcp_client
+branch = false
+
+[report]
+# Exclude integration-only paths that aren't reachable from unit tests
+exclude_lines =
+    pragma: no cover
+    if __name__ == .__main__.:
+    raise NotImplementedError
+    \.\.\.
+
+omit =
+    tests/*

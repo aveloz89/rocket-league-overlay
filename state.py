@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 
@@ -20,6 +21,7 @@ class MatchAggregator:
     me_name: str | None = None
     match_guid: str | None = None
     started_at: datetime | None = None
+    started_monotonic: float | None = None
 
     # Direct snapshot from latest UpdateState
     score: int = 0
@@ -69,6 +71,7 @@ class MatchAggregator:
         self.me_id, self.me_name = keep
         self.match_guid = match_guid
         self.started_at = datetime.now(timezone.utc)
+        self.started_monotonic = time.monotonic()
 
     def on_initialized(self, data: dict) -> None:
         guid = data.get("MatchGuid", "unknown")
@@ -76,6 +79,11 @@ class MatchAggregator:
         # Open the detection window for the first 75 frames (~5s @ 15Hz throttled)
         self._detect_window_frames = 75
         self._detect_target_counts = {}
+
+    def is_match_guid_change(self, data: dict) -> bool:
+        """Return True if this UpdateState belongs to a different match than the current one."""
+        guid = data.get("MatchGuid")
+        return bool(guid) and self.match_guid is not None and self.match_guid != guid
 
     def on_update_state(self, data: dict) -> dict | None:
         """Update state from an UpdateState event. Returns identity if detected this frame."""
@@ -94,7 +102,9 @@ class MatchAggregator:
         self.arena = game.get("Arena", self.arena)
         self.clock = int(game.get("TimeSeconds", self.clock))
 
-        # Init match guid if first frame is UpdateState (no Initialized seen)
+        # Init match guid if first frame is UpdateState (no Initialized seen).
+        # NOTE: caller is responsible for persisting the prior match snapshot
+        # before this method is invoked when is_match_guid_change() returns True.
         guid = data.get("MatchGuid")
         if guid and self.match_guid != guid:
             self.reset_match(guid)
@@ -234,9 +244,15 @@ class MatchAggregator:
         return round(self.own_hit_power_sum / self.ball_hits, 1) if self.ball_hits > 0 else 0.0
 
     def score_per_minute(self) -> int:
-        # Match clock counts down from 300; elapsed = 300 - clock once a real frame has been seen
-        elapsed_min = max(0.5, (300 - self.clock) / 60)
-        return round(self.score / elapsed_min) if self.frames > 0 else 0
+        # Use real elapsed time since match started rather than the in-game clock —
+        # the clock counts down from 300 in regular play but jumps to 0 in overtime,
+        # and a spectator joining mid-match would inherit a misleading "elapsed".
+        if self.started_monotonic is None or self.frames == 0:
+            return 0
+        elapsed_min = (time.monotonic() - self.started_monotonic) / 60
+        if elapsed_min < 0.1:
+            return 0
+        return round(self.score / elapsed_min)
 
     def goal_participation_pct(self) -> int:
         if self.me_team < 0:
