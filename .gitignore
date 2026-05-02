@@ -6,3 +6,6 @@ __pycache__/
 build/
 dist/
 *.spec
+
+# Local copy of the working methodology — see https://github.com/aveloz89/claude-methodology
+claude-methodology/
