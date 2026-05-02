@@ -133,12 +133,16 @@
     if (!values || values.length === 0) return svg;
 
     const filtered = values.filter((v) => v !== null && v !== undefined);
-    if (filtered.length === 0) return svg;
+    // A line needs at least two points; sparse series with a single non-null
+    // value would otherwise produce a degenerate path that closes onto itself.
+    if (filtered.length < 2) return svg;
 
     const min = Math.min(...filtered);
     const max = Math.max(...filtered);
+    // `||` is intentional here: when min === max the range is 0 (falsy) and
+    // we want 1 to avoid divide-by-zero. `??` would only fire on null/undefined.
     const range = max - min || 1;
-    const stepX = values.length > 1 ? 100 / (values.length - 1) : 0;
+    const stepX = 100 / (values.length - 1);
 
     const points = values.map((v, i) => {
       if (v === null || v === undefined) return null;
@@ -152,8 +156,10 @@
       .filter(Boolean)
       .join(" ");
 
-    const firstX = (points.findIndex((p) => p !== null) * stepX).toFixed(1);
-    const lastX = ((points.length - 1) * stepX).toFixed(1);
+    const firstNonNull = points.findIndex((p) => p !== null);
+    const lastNonNull = points.length - 1 - [...points].reverse().findIndex((p) => p !== null);
+    const firstX = (firstNonNull * stepX).toFixed(1);
+    const lastX = (lastNonNull * stepX).toFixed(1);
     const areaPath = `${linePath} L${lastX},30 L${firstX},30 Z`;
 
     const area = document.createElementNS(svgNS, "path");
@@ -248,15 +254,12 @@
     $("player-name").textContent = last.player_name ?? "—";
 
     const result = $("last-result");
+    const myScore = last.me_team === 0 ? last.blue_score : last.orange_score;
+    const oppScore = last.me_team === 0 ? last.orange_score : last.blue_score;
     if (last.won === true) {
-      result.textContent = `V ${last.blue_score ?? 0}-${last.orange_score ?? 0}`;
-      const myScore = last.me_team === 0 ? last.blue_score : last.orange_score;
-      const oppScore = last.me_team === 0 ? last.orange_score : last.blue_score;
       result.textContent = `V ${myScore}-${oppScore}`;
       result.dataset.outcome = "win";
     } else if (last.won === false) {
-      const myScore = last.me_team === 0 ? last.blue_score : last.orange_score;
-      const oppScore = last.me_team === 0 ? last.orange_score : last.blue_score;
       result.textContent = `D ${myScore}-${oppScore}`;
       result.dataset.outcome = "loss";
     } else {

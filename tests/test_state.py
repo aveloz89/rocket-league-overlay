@@ -457,6 +457,31 @@ def test_no_pad_for_natural_consumption():
     assert agg.small_pads == 0
 
 
+def test_respawn_does_not_count_as_pad_pickup():
+    """Demolition + respawn sequence: bHasCar flips True→False (death) then
+    False→True with Boost=33 (RL gives 1/3 boost on respawn). The 33-point
+    jump must NOT be counted as a small-pad pickup."""
+    agg = MatchAggregator()
+    agg.me_id, agg.me_name = "Steam|1|0", "alas"
+    agg.on_initialized({"MatchGuid": "M1"})
+
+    # Healthy frame at 60 boost
+    agg.on_update_state(make_state(me_boost=60, me_has_car=True))
+    # Demolition: bHasCar=False, Boost=0
+    agg.on_update_state(make_state(me_boost=0, me_has_car=False))
+    # Respawn: bHasCar=True, Boost=33
+    agg.on_update_state(make_state(me_boost=33, me_has_car=True))
+
+    assert agg.demos_taken == 1
+    assert agg.big_pads == 0
+    assert agg.small_pads == 0
+
+    # Real pickup after respawn should still register
+    agg.on_update_state(make_state(me_boost=33, me_has_car=True))
+    agg.on_update_state(make_state(me_boost=45, me_has_car=True))
+    assert agg.small_pads == 1
+
+
 def test_boost_stolen_detected_in_opponent_half():
     """A pickup at Y > 0 (after team mirror) is counted as stolen."""
     agg = MatchAggregator()

@@ -271,6 +271,10 @@ _INSIGHT_DEFS: list[tuple[str, str, str, int, str]] = [
 
 def _row_to_match(row: sqlite3.Row, columns: list[str]) -> dict:
     raw = dict(zip(columns, row))
+    # Defense in depth: the WS / HTTP responses don't need to echo the platform
+    # PrimaryId back. The frontend only uses player_name. If origin checks ever
+    # leak, dropping this here narrows what an attacker can read.
+    raw.pop("player_id", None)
     won = raw.get("won")
     raw["won"] = None if won is None else bool(won)
     shots = raw.get("shots") or 0
@@ -415,8 +419,10 @@ def _generate_insights(last: dict, avg: dict) -> list[str]:
             continue
         diff = float(last_v) - float(avg_v)
         worse_by = -direction * diff  # positive when last is worse than avg
-        abs_avg = abs(avg_v) if avg_v else 1
-        rel = worse_by / abs_avg if abs_avg else 0
+        # Treat avg=0 explicitly so the relative threshold doesn't fire on
+        # every tiny absolute deviation when the baseline is a true zero.
+        abs_avg = abs(avg_v) if avg_v != 0 else 1
+        rel = worse_by / abs_avg
         if worse_by >= INSIGHT_ABS_THRESHOLD or rel >= INSIGHT_REL_THRESHOLD:
             phrase = (
                 f"{label} {round(last_v)}{suffix} (avg {round(avg_v)}{suffix}) — {advice}"

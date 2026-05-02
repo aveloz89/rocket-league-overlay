@@ -81,9 +81,15 @@ def test_hub_unsubscribe_stops_delivery():
 def test_origin_allowed_loopback_and_obs():
     assert app._origin_allowed("http://127.0.0.1:8080") is True
     assert app._origin_allowed("http://localhost:8080") is True
-    assert app._origin_allowed("null") is True
     # OBS Browser Source omits the header entirely
     assert app._origin_allowed(None) is True
+
+
+def test_origin_null_rejected():
+    """Sandboxed iframes (`<iframe sandbox>`) and data:/blob: contexts send
+    `Origin: null`. Any external site can mint such a context, so the WS must
+    NOT trust it — only the absence of an Origin header (OBS) is allowed."""
+    assert app._origin_allowed("null") is False
 
 
 def test_origin_allowed_any_port_on_loopback():
@@ -99,6 +105,12 @@ def test_origin_allowed_rejects_external():
     assert app._origin_allowed("http://192.168.1.10:8080") is False
     # LAN addresses must stay rejected even on the default port
     assert app._origin_allowed("http://10.0.0.5:8080") is False
+
+
+def test_origin_allowed_rejects_lookalike_subdomains():
+    """Hostname tail-attacks: `127.0.0.1.evil.com` must NOT match `127.0.0.1`."""
+    assert app._origin_allowed("http://127.0.0.1.evil.com") is False
+    assert app._origin_allowed("http://localhost.evil.com") is False
 
 
 def test_origin_allowed_rejects_malformed_or_unknown_scheme():

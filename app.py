@@ -8,6 +8,7 @@ import sys
 import time
 from contextlib import asynccontextmanager
 from pathlib import Path
+from urllib.parse import urlparse
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse
@@ -92,13 +93,15 @@ class Hub:
 # so a malicious page in the user's browser can't open a WS to read PII.
 # We accept any port — the user controls --port via CLI, and same-machine origin
 # is the threat model we care about, not a specific port.
-LOOPBACK_HOSTS = frozenset({"127.0.0.1", "localhost", "::1", "[::1]"})
+# Note: "null" Origin is intentionally rejected. It's set by sandboxed iframes
+# (`<iframe sandbox>` without `allow-same-origin`) and `data:`/`blob:` contexts —
+# any external site can mint such an iframe and would otherwise reach this WS.
+LOOPBACK_HOSTS = frozenset({"127.0.0.1", "localhost", "::1"})
 
 
 def _origin_allowed(origin: str | None) -> bool:
-    if origin is None or origin == "null":
+    if origin is None:  # OBS Browser Source omits the header
         return True
-    from urllib.parse import urlparse
     try:
         parsed = urlparse(origin)
     except ValueError:

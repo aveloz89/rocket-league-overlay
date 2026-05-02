@@ -198,12 +198,19 @@ class MatchAggregator:
             if on_ground is False:
                 self.frames_airborne += 1
 
+            prev_has_car = self.prev_has_car
             has_car = bool(me.get("bHasCar", True))
-            if self.prev_has_car and not has_car:
+            if prev_has_car and not has_car:
                 self.demos_taken += 1
             self.prev_has_car = has_car
 
-            self._track_boost_pickup(me, boost_now)
+            # Skip pickup detection on death/respawn frames — boost jumps from
+            # an arbitrary value to 0 (death) and from 0 to 33 (respawn);
+            # neither is a real pad pickup.
+            if has_car and prev_has_car:
+                self._track_boost_pickup(me, boost_now)
+            else:
+                self._prev_boost = boost_now
             self._track_position(me, game, players)
             self._track_aerial(me, on_ground)
 
@@ -295,9 +302,10 @@ class MatchAggregator:
         if my_y < ball_y:
             self.frames_behind_ball += 1
 
-        # 3D distance to ball
+        # 3D distance to ball — magnitude is sign-invariant, so we can reuse
+        # the already-normalized Y values without affecting the result.
         dx = float(me_loc.get("X", 0.0)) - float(ball_loc.get("X", 0.0))
-        dy = float(me_loc["Y"]) - float(ball_loc["Y"])
+        dy = my_y - ball_y
         dz = float(me_loc.get("Z", 0.0)) - float(ball_loc.get("Z", 0.0))
         self.dist_to_ball_sum += (dx * dx + dy * dy + dz * dz) ** 0.5
 
