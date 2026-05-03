@@ -84,7 +84,7 @@ button:focus-visible {
   align-items: center;
   justify-content: space-between;
   gap: var(--space-4);
-  padding: var(--space-4) var(--space-6);
+  padding: var(--space-3) var(--space-5);
   border-bottom: 1px solid var(--border);
   background: var(--bg);
   position: sticky;
@@ -163,15 +163,15 @@ button:focus-visible {
 .page-main {
   max-width: 1100px;
   margin: 0 auto;
-  padding: var(--space-6);
+  padding: var(--space-4) var(--space-5);
   display: flex;
   flex-direction: column;
-  gap: var(--space-5);
+  gap: var(--space-3);
 }
 
 .empty {
   text-align: center;
-  padding: var(--space-8) var(--space-4);
+  padding: var(--space-6) var(--space-4);
   background: var(--bg-soft);
   border-radius: var(--radius);
 }
@@ -186,17 +186,17 @@ button:focus-visible {
 .live {
   background: var(--bg-soft);
   border-radius: var(--radius);
-  padding: var(--space-5);
+  padding: var(--space-4);
   display: flex;
   flex-direction: column;
-  gap: var(--space-4);
+  gap: var(--space-3);
 }
 
 .live-head {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: var(--space-2);
+  gap: var(--space-1);
 }
 
 .live-head h2 {
@@ -262,12 +262,12 @@ button:focus-visible {
 .live-grids {
   display: grid;
   grid-template-columns: 1fr;
-  gap: var(--space-4);
+  gap: var(--space-3);
 }
 
 @media (min-width: 720px) {
   .live-grids {
-    grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
   }
 }
 
@@ -282,7 +282,7 @@ button:focus-visible {
 .big-stat {
   flex: 1 1 8rem;
   background: var(--bg-inset);
-  padding: var(--space-3) var(--space-4);
+  padding: var(--space-2) var(--space-3);
   border-radius: var(--radius-sm);
   display: flex;
   flex-direction: column;
@@ -297,9 +297,16 @@ button:focus-visible {
 }
 
 .big-stat .val {
-  font-size: 1.625rem;
+  font-size: 1.5rem;
   font-weight: 800;
   line-height: 1;
+}
+
+.big-stat .val .suffix {
+  font-size: 0.875rem;
+  color: var(--muted);
+  font-weight: 600;
+  margin-left: 0.125rem;
 }
 
 .big-stat.score .val { color: var(--accent); }
@@ -357,10 +364,10 @@ button:focus-visible {
 .hero {
   background: var(--bg-soft);
   border-radius: var(--radius);
-  padding: var(--space-5);
+  padding: var(--space-4);
   display: flex;
   flex-direction: column;
-  gap: var(--space-4);
+  gap: var(--space-3);
 }
 
 .hero-head {
@@ -452,22 +459,22 @@ button:focus-visible {
 .cats {
   display: grid;
   grid-template-columns: 1fr;
-  gap: var(--space-4);
+  gap: var(--space-3);
 }
 
 @media (min-width: 720px) {
   .cats {
-    grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
   }
 }
 
 .cat {
   background: var(--bg-soft);
   border-radius: var(--radius);
-  padding: var(--space-4) var(--space-5);
+  padding: var(--space-3) var(--space-4);
   display: flex;
   flex-direction: column;
-  gap: var(--space-3);
+  gap: var(--space-2);
 }
 
 .cat h2 {
@@ -477,7 +484,7 @@ button:focus-visible {
   color: var(--accent);
   font-weight: 700;
   border-bottom: 1px solid var(--border);
-  padding-bottom: var(--space-2);
+  padding-bottom: var(--space-1);
 }
 
 .rows {
@@ -486,7 +493,7 @@ button:focus-visible {
   padding: 0;
   display: flex;
   flex-direction: column;
-  gap: var(--space-2);
+  gap: 0;
 }
 
 .row {
@@ -494,9 +501,9 @@ button:focus-visible {
   grid-template-columns: 1fr auto auto auto;
   align-items: baseline;
   gap: var(--space-3);
-  padding: var(--space-2) 0;
+  padding: var(--space-1) 0;
   border-bottom: 1px dashed var(--border);
-  font-size: 0.9375rem;
+  font-size: 0.875rem;
 }
 
 .row:last-child {
@@ -509,7 +516,7 @@ button:focus-visible {
 
 .row .value {
   font-weight: 800;
-  font-size: 1.0625rem;
+  font-size: 1rem;
 }
 
 .row .compare,
@@ -532,10 +539,10 @@ button:focus-visible {
 .trend {
   background: var(--bg-soft);
   border-radius: var(--radius);
-  padding: var(--space-4) var(--space-5);
+  padding: var(--space-3) var(--space-4);
   display: flex;
   flex-direction: column;
-  gap: var(--space-3);
+  gap: var(--space-2);
 }
 
 .trend h2 {
@@ -613,10 +620,10 @@ button:focus-visible {
 .today-detail {
   background: var(--bg-soft);
   border-radius: var(--radius);
-  padding: var(--space-5);
+  padding: var(--space-4);
   display: flex;
   flex-direction: column;
-  gap: var(--space-4);
+  gap: var(--space-3);
 }
 
 .today-head h2 {
