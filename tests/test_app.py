@@ -123,13 +123,13 @@ def test_origin_allowed_rejects_malformed_or_unknown_scheme():
 
 
 def test_handle_initialized_resets_aggregator(fresh_state):
-    app.handle_event({"Event": "Initialized", "Data": {"MatchGuid": "M1"}})
+    app.handle_event({"Event": "MatchInitialized", "Data": {"MatchGuid": "M1"}})
     assert app.agg.match_guid == "M1"
 
 
 def test_handle_update_state_broadcasts_match(fresh_state):
     app.agg.me_id, app.agg.me_name = "Steam|1|0", "alas"
-    app.handle_event({"Event": "Initialized", "Data": {"MatchGuid": "M1"}})
+    app.handle_event({"Event": "MatchInitialized", "Data": {"MatchGuid": "M1"}})
     app.handle_event({
         "Event": "UpdateState",
         "Data": {
@@ -177,7 +177,7 @@ def test_match_guid_change_persists_prior_match(fresh_state):
 
 def test_match_ended_persists_match(fresh_state):
     app.agg.me_id, app.agg.me_name = "Steam|1|0", "alas"
-    app.handle_event({"Event": "Initialized", "Data": {"MatchGuid": "M1"}})
+    app.handle_event({"Event": "MatchInitialized", "Data": {"MatchGuid": "M1"}})
     app.handle_event({
         "Event": "UpdateState",
         "Data": {
@@ -273,7 +273,7 @@ def test_persist_current_match_skips_when_db_missing(fresh_state, monkeypatch):
 def test_tcp_pump_continues_after_handler_error(fresh_state, monkeypatch):
     """A single bad event must not kill the pump task."""
     events = [
-        {"Event": "Initialized", "Data": {"MatchGuid": "M1"}},
+        {"Event": "MatchInitialized", "Data": {"MatchGuid": "M1"}},
         {"Event": "UpdateState", "Data": "this is not a dict"},  # malformed
         {"Event": "MatchEnded", "Data": {"MatchGuid": "M1"}},
     ]
@@ -353,7 +353,7 @@ def test_match_ended_broadcasts_today_even_without_identity(fresh_state):
 def test_match_ended_broadcasts_coach(fresh_state):
     """MatchEnded should also publish a 'coach' payload so /coach refreshes live."""
     app.agg.me_id, app.agg.me_name = "Steam|1|0", "alas"
-    app.handle_event({"Event": "Initialized", "Data": {"MatchGuid": "M1"}})
+    app.handle_event({"Event": "MatchInitialized", "Data": {"MatchGuid": "M1"}})
     app.handle_event({
         "Event": "UpdateState",
         "Data": {
@@ -446,7 +446,7 @@ def test_hub_caches_coach_payload_for_late_subscribers():
 # T19: handle_event with StatfeedEvent calls agg.on_statfeed_event
 def test_handle_statfeed_event_increments_counter(fresh_state):
     app.agg.me_id, app.agg.me_name = "Steam|1|0", "alas"
-    app.handle_event({"Event": "Initialized", "Data": {"MatchGuid": "M1"}})
+    app.handle_event({"Event": "MatchInitialized", "Data": {"MatchGuid": "M1"}})
 
     app.handle_event({
         "Event": "StatfeedEvent",
@@ -464,7 +464,7 @@ def test_handle_statfeed_event_increments_counter(fresh_state):
 def test_handle_statfeed_event_no_broadcast(fresh_state):
     """StatfeedEvent must NOT trigger a match broadcast (no WS noise mid-game)."""
     app.agg.me_id, app.agg.me_name = "Steam|1|0", "alas"
-    app.handle_event({"Event": "Initialized", "Data": {"MatchGuid": "M1"}})
+    app.handle_event({"Event": "MatchInitialized", "Data": {"MatchGuid": "M1"}})
 
     # Capture hub state before and after
     before_latest = dict(app.hub._latest)
@@ -487,7 +487,7 @@ def test_handle_statfeed_event_no_broadcast(fresh_state):
 def test_integration_statfeed_persisted_in_coach_stats(fresh_state):
     """A complete match flow with StatfeedEvents results in highlights in coach_stats."""
     app.agg.me_id, app.agg.me_name = "Steam|1|0", "alas"
-    app.handle_event({"Event": "Initialized", "Data": {"MatchGuid": "M1"}})
+    app.handle_event({"Event": "MatchInitialized", "Data": {"MatchGuid": "M1"}})
 
     # One UpdateState so started_at is set and player identity confirmed
     app.handle_event({

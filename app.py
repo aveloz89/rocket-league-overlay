@@ -209,7 +209,7 @@ def handle_event(event: dict) -> None:
     name = event.get("Event")
     data = event.get("Data") or {}
 
-    if name == "Initialized":
+    if name == "MatchInitialized":
         # If a previous match was in progress and never sent MatchEnded, persist
         # it before resetting the aggregator.
         if agg.match_guid:
@@ -220,7 +220,7 @@ def handle_event(event: dict) -> None:
 
     if name == "UpdateState":
         # Same defense for the case where the game rotates MatchGuid without
-        # an Initialized event (e.g. spectator transitions).
+        # a MatchInitialized event (e.g. spectator transitions).
         if agg.is_match_guid_change(data):
             _persist_current_match()
             _broadcast_today()
