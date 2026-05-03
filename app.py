@@ -236,21 +236,6 @@ async def tcp_pump(host: str, port: int) -> None:
             log.warning("dropped event due to handler error: %s — payload=%r", exc, event)
 
 
-DEMO_GOAL_HIGHLIGHTS = ("AerialGoal", "BicycleGoal", "LongGoal")
-DEMO_SAVE_HIGHLIGHTS = ("EpicSave", "Saviour")
-
-
-def _emit_demo_statfeed(name: str, causer: dict, victim: dict | None = None) -> None:  # pragma: no cover
-    payload: dict = {
-        "MatchGuid": agg.match_guid,
-        "Event": name,
-        "Causer": causer,
-    }
-    if victim is not None:
-        payload["Victim"] = victim
-    handle_event({"Event": "StatfeedEvent", "Data": payload})
-
-
 async def _demo_match() -> None:  # pragma: no cover — preview-only synthetic events
     """Run one synthetic demo match. Returns when MatchEnded is fired."""
     me_id = "Steam|76561197960409023|0"
@@ -354,11 +339,6 @@ async def _demo_match() -> None:  # pragma: no cover — preview-only synthetic 
                         },
                     },
                 })
-                if random.random() < 0.08:
-                    _emit_demo_statfeed(
-                        "CenteringBall",
-                        {"Name": me_name, "PrimaryId": me_id, "TeamNum": 0},
-                    )
             elif roll < 0.7:
                 # Me shot
                 me_state["Shots"] += 1
@@ -367,19 +347,10 @@ async def _demo_match() -> None:  # pragma: no cover — preview-only synthetic 
                     me_state["Goals"] += 1
                     me_state["Score"] += 100
                     blue_score += 1
-                    me_player = {"Name": me_name, "PrimaryId": me_id, "TeamNum": 0}
-                    opp_player = {"Name": opp["Name"], "PrimaryId": opp["PrimaryId"], "TeamNum": 1}
-                    if random.random() < 0.5:
-                        _emit_demo_statfeed(random.choice(DEMO_GOAL_HIGHLIGHTS), me_player, opp_player)
-                    if me_state["Goals"] == 3:
-                        _emit_demo_statfeed("HatTrick", me_player)
             elif roll < 0.82:
                 # Save
                 me_state["Saves"] += 1
                 me_state["Score"] += 75
-                if random.random() < 0.5:
-                    me_player = {"Name": me_name, "PrimaryId": me_id, "TeamNum": 0}
-                    _emit_demo_statfeed(random.choice(DEMO_SAVE_HIGHLIGHTS), me_player)
             elif roll < 0.9:
                 # Demo by opponent (you go bHasCar=False briefly)
                 me_state["bHasCar"] = False
@@ -410,11 +381,6 @@ async def _demo_match() -> None:  # pragma: no cover — preview-only synthetic 
         await asyncio.sleep(1 / 15)
         elapsed += 1 / 15
 
-    if blue_score > orange_score and random.random() < 0.4:
-        _emit_demo_statfeed(
-            "MVP",
-            {"Name": me_name, "PrimaryId": me_id, "TeamNum": 0},
-        )
     handle_event({"Event": "MatchEnded", "Data": {"MatchGuid": agg.match_guid}})
 
 
