@@ -43,6 +43,18 @@
     { key: "hardest_hit", label: "Hardest hit", suffix: "", direction: "high_good" },
   ];
 
+  const HIGHLIGHT_ROWS = [
+    { key: "epic_saves",    label: "Epic saves",   suffix: "", direction: "high_good" },
+    { key: "saviors",       label: "Saviors",      suffix: "", direction: "high_good" },
+    { key: "aerial_goals",  label: "Aerial goals", suffix: "", direction: "high_good" },
+    { key: "bicycle_goals", label: "Bicycle goals", suffix: "", direction: "high_good" },
+    { key: "long_goals",    label: "Long goals",   suffix: "", direction: "high_good" },
+    { key: "centers",       label: "Centers",      suffix: "", direction: "high_good" },
+    { key: "pool_shots",    label: "Pool shots",   suffix: "", direction: "high_good" },
+    { key: "hat_tricks",    label: "Hat tricks",   suffix: "", direction: "high_good" },
+    { key: "mvps",          label: "MVPs",         suffix: "", direction: "high_good" },
+  ];
+
   const TREND_METRICS = [
     { key: "win_rate", label: "Win rate", suffix: "%", direction: "high_good" },
     { key: "score_per_min", label: "Score/min", suffix: "", direction: "high_good" },
@@ -273,6 +285,7 @@
     renderRows("cat-pos", POSITIONING_ROWS, last, avg);
     renderRows("cat-boost", BOOST_ROWS, last, avg);
     renderRows("cat-mech", MECH_ROWS, last, avg);
+    renderRows("cat-highlights", HIGHLIGHT_ROWS, last, avg);
     renderTrend(data.trend);
     renderToday(data.today);
   };

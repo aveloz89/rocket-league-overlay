@@ -1,5 +1,8 @@
+import logging
 import sys
 from pathlib import Path
+
+import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
@@ -631,3 +634,200 @@ def test_db_snapshot_includes_new_fields():
     assert "score_per_min" in snap
     # With Location present, positioning is captured (not None)
     assert snap["time_def_third_pct"] == 100  # all frames in def third
+
+
+# ── Statfeed highlights ──────────────────────────────────────────────────────
+
+
+def _make_statfeed(event_name: str, causer_id: str = "Steam|1|0",
+                   causer_name: str = "alas") -> dict:
+    """Build a StatfeedEvent Data payload."""
+    return {
+        "MatchGuid": "M1",
+        "Event": event_name,
+        "Causer": {"Name": causer_name, "PrimaryId": causer_id, "TeamNum": 0},
+        "Victim": {"Name": "jstn", "PrimaryId": "Epic|2|0", "TeamNum": 1},
+    }
+
+
+# T1: _STATFEED_EVENTS mapping has correct keys and values
+def test_statfeed_events_mapping_keys_and_aliases():
+    from state import _STATFEED_EVENTS
+
+    # All 9 attributes are reachable
+    assert set(_STATFEED_EVENTS.values()) == {
+        "epic_saves", "hat_tricks", "aerial_goals", "bicycle_goals",
+        "long_goals", "centers", "pool_shots", "saviors", "mvps",
+    }
+    # Aliases map to the same attribute
+    assert _STATFEED_EVENTS["center"] == _STATFEED_EVENTS["centeringball"] == "centers"
+    assert _STATFEED_EVENTS["saviour"] == _STATFEED_EVENTS["savior"] == "saviors"
+    # Total: 11 keys (9 unique events + 2 aliases)
+    assert len(_STATFEED_EVENTS) == 11
+
+
+# T2: new attributes default to 0 on a fresh aggregator
+def test_statfeed_attributes_default_to_zero():
+    agg = MatchAggregator()
+    for attr in ("epic_saves", "hat_tricks", "aerial_goals", "bicycle_goals",
+                 "long_goals", "centers", "pool_shots", "saviors", "mvps"):
+        assert getattr(agg, attr) == 0, f"{attr} should default to 0"
+
+
+# T3: EpicSave increments epic_saves when Causer.PrimaryId matches
+def test_on_statfeed_event_increments_epic_saves_by_id():
+    agg = MatchAggregator()
+    agg.me_id, agg.me_name = "Steam|1|0", "alas"
+    agg.on_initialized({"MatchGuid": "M1"})
+
+    agg.on_statfeed_event(_make_statfeed("EpicSave"))
+    assert agg.epic_saves == 1
+
+
+# T4: ignore event when Causer does not match user
+def test_on_statfeed_event_ignores_other_player():
+    agg = MatchAggregator()
+    agg.me_id, agg.me_name = "Steam|1|0", "alas"
+    agg.on_initialized({"MatchGuid": "M1"})
+
+    agg.on_statfeed_event(_make_statfeed("EpicSave", causer_id="Epic|999|0",
+                                         causer_name="jstn"))
+    assert agg.epic_saves == 0
+
+
+# T5: ignore event during replay
+def test_on_statfeed_event_ignores_during_replay():
+    agg = MatchAggregator()
+    agg.me_id, agg.me_name = "Steam|1|0", "alas"
+    agg.on_initialized({"MatchGuid": "M1"})
+    agg.in_replay = True
+
+    agg.on_statfeed_event(_make_statfeed("EpicSave"))
+    assert agg.epic_saves == 0
+
+
+# T6: ignore event without Causer or without Event
+def test_on_statfeed_event_ignores_missing_causer():
+    agg = MatchAggregator()
+    agg.me_id, agg.me_name = "Steam|1|0", "alas"
+    agg.on_initialized({"MatchGuid": "M1"})
+
+    # No Causer key
+    agg.on_statfeed_event({"MatchGuid": "M1", "Event": "EpicSave"})
+    assert agg.epic_saves == 0
+
+
+def test_on_statfeed_event_ignores_missing_event_name():
+    agg = MatchAggregator()
+    agg.me_id, agg.me_name = "Steam|1|0", "alas"
+    agg.on_initialized({"MatchGuid": "M1"})
+
+    agg.on_statfeed_event({
+        "MatchGuid": "M1",
+        "Causer": {"Name": "alas", "PrimaryId": "Steam|1|0", "TeamNum": 0},
+    })
+    assert agg.epic_saves == 0
+
+
+# T7: ignore event when match_guid is None
+def test_on_statfeed_event_ignores_without_active_match():
+    agg = MatchAggregator()
+    agg.me_id, agg.me_name = "Steam|1|0", "alas"
+    # match_guid is None (no Initialized called)
+
+    agg.on_statfeed_event(_make_statfeed("EpicSave"))
+    assert agg.epic_saves == 0
+
+
+# T8: fallback by name when me_id not yet locked
+def test_on_statfeed_event_fallback_by_name():
+    agg = MatchAggregator()
+    agg.me_name = "alas"  # name known, id not yet locked
+    agg.me_id = None
+    agg.on_initialized({"MatchGuid": "M1"})
+
+    agg.on_statfeed_event(_make_statfeed("EpicSave", causer_id="", causer_name="alas"))
+    assert agg.epic_saves == 1
+
+
+# T9: alias events Center/CenteringBall → centers; Saviour/Savior → saviors
+def test_on_statfeed_event_center_and_centeringball_aliases():
+    agg = MatchAggregator()
+    agg.me_id, agg.me_name = "Steam|1|0", "alas"
+    agg.on_initialized({"MatchGuid": "M1"})
+
+    agg.on_statfeed_event(_make_statfeed("Center"))
+    agg.on_statfeed_event(_make_statfeed("CenteringBall"))
+    assert agg.centers == 2
+
+
+def test_on_statfeed_event_saviour_and_savior_aliases():
+    agg = MatchAggregator()
+    agg.me_id, agg.me_name = "Steam|1|0", "alas"
+    agg.on_initialized({"MatchGuid": "M1"})
+
+    agg.on_statfeed_event(_make_statfeed("Saviour"))
+    agg.on_statfeed_event(_make_statfeed("Savior"))
+    assert agg.saviors == 2
+
+
+# T10: all remaining event types increment their respective counters
+@pytest.mark.parametrize("event_name,attr", [
+    ("HatTrick", "hat_tricks"),
+    ("AerialGoal", "aerial_goals"),
+    ("BicycleGoal", "bicycle_goals"),
+    ("LongGoal", "long_goals"),
+    ("PoolShot", "pool_shots"),
+    ("MVP", "mvps"),
+    ("Center", "centers"),
+    ("Savior", "saviors"),
+])
+def test_on_statfeed_event_all_event_types(event_name, attr):
+    agg = MatchAggregator()
+    agg.me_id, agg.me_name = "Steam|1|0", "alas"
+    agg.on_initialized({"MatchGuid": "M1"})
+
+    agg.on_statfeed_event(_make_statfeed(event_name))
+    assert getattr(agg, attr) == 1
+
+
+# T11: unknown event logs debug and does not increment anything
+def test_on_statfeed_event_unknown_logs_debug_and_no_increment(caplog):
+    agg = MatchAggregator()
+    agg.me_id, agg.me_name = "Steam|1|0", "alas"
+    agg.on_initialized({"MatchGuid": "M1"})
+
+    with caplog.at_level(logging.DEBUG):
+        agg.on_statfeed_event(_make_statfeed("FlipReset"))
+
+    assert agg.epic_saves == 0
+    assert any("FlipReset" in r.message or "flipreset" in r.message.lower()
+               for r in caplog.records)
+
+
+# T12: to_db_snapshot includes the 9 highlight keys
+def test_db_snapshot_includes_highlight_fields():
+    agg = MatchAggregator()
+    agg.me_id, agg.me_name = "Steam|1|0", "alas"
+    agg.on_initialized({"MatchGuid": "M1"})
+    agg.on_statfeed_event(_make_statfeed("EpicSave"))
+    agg.on_statfeed_event(_make_statfeed("HatTrick"))
+
+    snap = agg.to_db_snapshot()
+    assert snap["epic_saves"] == 1
+    assert snap["hat_tricks"] == 1
+    for key in ("aerial_goals", "bicycle_goals", "long_goals",
+                "centers", "pool_shots", "saviors", "mvps"):
+        assert snap[key] == 0
+
+
+# T13: reset_match (via on_initialized) resets all highlight counters to 0
+def test_statfeed_counters_reset_on_new_match():
+    agg = MatchAggregator()
+    agg.me_id, agg.me_name = "Steam|1|0", "alas"
+    agg.on_initialized({"MatchGuid": "M1"})
+    agg.on_statfeed_event(_make_statfeed("EpicSave"))
+    assert agg.epic_saves == 1
+
+    agg.on_initialized({"MatchGuid": "M2"})
+    assert agg.epic_saves == 0

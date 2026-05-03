@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
 import random
 import sys
 import time
@@ -209,6 +210,10 @@ def handle_event(event: dict) -> None:
         _broadcast_match()
         return
 
+    if name == "StatfeedEvent":
+        agg.on_statfeed_event(data)
+        return
+
     if name in MATCH_END_EVENTS:
         _persist_current_match()
         _broadcast_today()
@@ -389,7 +394,10 @@ async def demo_pump() -> None:  # pragma: no cover — preview-only entry point
 @asynccontextmanager
 async def lifespan(app: FastAPI):  # pragma: no cover — exercised via uvicorn at runtime
     global db
-    db = open_db()
+    # RL_OVERLAY_DB lets the operator point at an alternate SQLite file — handy
+    # for demo runs that shouldn't touch the user's real history.
+    db_override = os.environ.get("RL_OVERLAY_DB")
+    db = open_db(Path(db_override)) if db_override else open_db()
     _apply_config_identity()
 
     if app.state.demo:
