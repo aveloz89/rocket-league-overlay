@@ -119,7 +119,9 @@ button:focus-visible {
   text-transform: uppercase;
 }
 
-.conn[data-state="connected"] { color: var(--good); }
+.conn[data-state="connecting"] { color: var(--muted); }
+.conn[data-state="connected"] { color: var(--warn); }
+.conn[data-state="active"] { color: var(--good); }
 .conn[data-state="disconnected"] { color: var(--bad); }
 
 .rank-picker {
