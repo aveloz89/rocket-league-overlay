@@ -2,15 +2,43 @@
 <html lang="en">
   <head>
     <meta charset="utf-8" />
-    <title>RL Live Overlay</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>RL Coach Dashboard</title>
+    <meta name="description" content="Personal Rocket League dashboard: live match, last match, positioning, mechanics and today's record." />
     <link rel="stylesheet" href="/static/overlay.css" />
   </head>
   <body>
-    <div id="root">
-      <div id="status">waiting for game…</div>
+    <header class="page-header">
+      <h1>
+        <span class="brand">COACH</span>
+        <span class="player" id="player-name">—</span>
+      </h1>
+      <label class="rank-picker">
+        <span class="visually-hidden">Target rank</span>
+        <select id="rank-select">
+          <option value="">No target</option>
+          <option value="bronze">Bronze</option>
+          <option value="silver">Silver</option>
+          <option value="gold">Gold</option>
+          <option value="platinum">Platinum</option>
+          <option value="diamond">Diamond</option>
+          <option value="champion">Champion</option>
+          <option value="grand_champion">Grand Champion</option>
+          <option value="supersonic_legend">Supersonic Legend</option>
+        </select>
+      </label>
+      <span class="conn" id="conn" aria-live="polite">connecting…</span>
+    </header>
 
-      <main id="overlay" hidden>
-        <header class="context">
+    <main class="page-main">
+      <section class="empty" id="empty" hidden>
+        <p>No matches recorded yet.</p>
+        <p class="hint">Start Rocket League and play a match. Come back here when you're done.</p>
+      </section>
+
+      <section class="live" id="live" hidden aria-labelledby="live-heading">
+        <header class="live-head">
+          <h2 id="live-heading">Live match</h2>
           <div class="banner" id="banner" hidden></div>
           <div class="scoreline">
             <span class="team blue" id="ctx-blue-team">BLUE</span>
@@ -26,16 +54,14 @@
           </div>
         </header>
 
-        <section class="panel match">
-          <h2>MATCH</h2>
-
-          <div class="primary">
-            <div class="big-stat score">
-              <span class="label">SCORE</span>
-              <span class="val" id="m-score">0</span>
-            </div>
+        <div class="big-stats">
+          <div class="big-stat score">
+            <span class="label">SCORE</span>
+            <span class="val" id="m-score">0</span>
           </div>
+        </div>
 
+        <div class="live-grids">
           <div class="section">
             <h3>OUTPUT</h3>
             <ul class="grid">
@@ -61,76 +87,99 @@
           </div>
 
           <div class="section">
-            <h3>BOOST</h3>
-            <ul class="grid">
-              <li><span class="k">Avg</span><span class="v" id="m-boost-avg">0</span></li>
-              <li><span class="k">Wasted</span><span class="v" id="m-boost-wasted">0%</span></li>
-              <li class="wide"><span class="k">Time @ 0 boost</span><span class="v" id="m-zero-boost">0%</span></li>
-            </ul>
-          </div>
-
-          <div class="section">
-            <h3>MOVEMENT</h3>
-            <ul class="grid">
-              <li><span class="k">Supersonic</span><span class="v" id="m-supersonic">0%</span></li>
-              <li><span class="k">In air</span><span class="v" id="m-airborne">0%</span></li>
-            </ul>
-          </div>
-
-          <div class="section">
             <h3>COMBAT</h3>
             <ul class="grid">
               <li><span class="k">Demos given</span><span class="v" id="m-demos">0</span></li>
               <li><span class="k">Demos taken</span><span class="v" id="m-demos-taken">0</span></li>
             </ul>
           </div>
-        </section>
+        </div>
+      </section>
 
-        <section class="panel today">
-          <h2>TODAY</h2>
+      <section class="hero" id="hero" hidden aria-labelledby="last-heading">
+        <header class="hero-head">
+          <h2 id="last-heading">Last match</h2>
+          <p class="hero-meta">
+            <span class="result" id="last-result">—</span>
+            <span class="sep" aria-hidden="true">·</span>
+            <span><strong id="last-score">0</strong> score</span>
+            <span class="sep" aria-hidden="true">·</span>
+            <span><strong id="last-duration">0</strong> min</span>
+          </p>
+        </header>
+        <ul class="insights" id="insights"></ul>
+        <p class="insights-empty" id="insights-empty" hidden>
+          Keep playing to surface patterns — I need at least 5 prior matches for suggestions.
+        </p>
+      </section>
 
-          <div class="record">
-            <span class="big-stat">
-              <span class="label">W–L</span>
-              <span class="val"><span id="t-wins">0</span>–<span id="t-losses">0</span></span>
-            </span>
-            <span class="big-stat">
-              <span class="label">WIN %</span>
-              <span class="val"><span id="t-winrate">0</span>%</span>
-            </span>
-            <span class="big-stat">
-              <span class="label">MATCHES</span>
-              <span class="val" id="t-matches">0</span>
-            </span>
+      <section class="cats" id="cats" hidden aria-label="Stat categories">
+        <article class="cat">
+          <h2>Positioning</h2>
+          <ul class="rows" id="cat-pos"></ul>
+        </article>
+        <article class="cat">
+          <h2>Boost (advanced)</h2>
+          <ul class="rows" id="cat-boost"></ul>
+        </article>
+        <article class="cat">
+          <h2>Mechanics</h2>
+          <ul class="rows" id="cat-mech"></ul>
+        </article>
+        <article class="cat">
+          <h2>Highlights</h2>
+          <ul class="rows" id="cat-highlights"></ul>
+        </article>
+      </section>
+
+      <section class="trend" id="trend-section" hidden aria-labelledby="trend-heading">
+        <h2 id="trend-heading">Trend <span class="muted">(last 14 days)</span></h2>
+        <ul class="trend-rows" id="trend-rows"></ul>
+      </section>
+
+      <section class="today-detail" id="today-detail" hidden aria-labelledby="today-heading">
+        <header class="today-head">
+          <h2 id="today-heading">Today</h2>
+        </header>
+        <div class="big-stats">
+          <div class="big-stat">
+            <span class="label">W–L</span>
+            <span class="val"><span id="t-wins">0</span>–<span id="t-losses">0</span></span>
           </div>
-
-          <div class="section">
-            <h3>OUTPUT</h3>
-            <ul class="grid">
-              <li><span class="k">Goals</span><span class="v" id="t-goals">0</span></li>
-              <li><span class="k">Shots <em id="t-acc">(0%)</em></span><span class="v" id="t-shots">0</span></li>
-              <li><span class="k">Saves</span><span class="v" id="t-saves">0</span></li>
-              <li><span class="k">Assists</span><span class="v" id="t-assists">0</span></li>
-              <li><span class="k">Avg score</span><span class="v" id="t-avg-score">0</span></li>
-              <li><span class="k">Best score</span><span class="v" id="t-best-score">0</span></li>
-            </ul>
+          <div class="big-stat">
+            <span class="label">WIN %</span>
+            <span class="val"><span id="t-winrate">0</span>%</span>
           </div>
-
-          <div class="section">
-            <h3>ACTIVITY</h3>
-            <ul class="grid">
-              <li><span class="k">Ball hits</span><span class="v" id="t-ball-hits">0</span></li>
-              <li><span class="k">Best hit</span><span class="v" id="t-best-hit">0</span></li>
-              <li><span class="k">Demos</span><span class="v" id="t-demos">0</span></li>
-              <li><span class="k">Avg boost</span><span class="v" id="t-avg-boost">0</span></li>
-              <li><span class="k">Avg supersonic</span><span class="v" id="t-avg-super">0%</span></li>
-              <li><span class="k">Win streak</span><span class="v" id="t-streak">0</span></li>
-            </ul>
+          <div class="big-stat">
+            <span class="label">MATCHES</span>
+            <span class="val" id="t-matches">0</span>
           </div>
-        </section>
-      </main>
-    </div>
+        </div>
 
-    <script src="/static/overlay.js"></script>
+        <div class="section">
+          <h3>OUTPUT</h3>
+          <ul class="grid">
+            <li><span class="k">Goals</span><span class="v" id="t-goals">0</span></li>
+            <li><span class="k">Shots <em id="t-acc">(0%)</em></span><span class="v" id="t-shots">0</span></li>
+            <li><span class="k">Saves</span><span class="v" id="t-saves">0</span></li>
+            <li><span class="k">Assists</span><span class="v" id="t-assists">0</span></li>
+            <li><span class="k">Avg score</span><span class="v" id="t-avg-score">0</span></li>
+            <li><span class="k">Best score</span><span class="v" id="t-best-score">0</span></li>
+          </ul>
+        </div>
+
+        <div class="section">
+          <h3>ACTIVITY</h3>
+          <ul class="grid">
+            <li><span class="k">Ball hits</span><span class="v" id="t-ball-hits">0</span></li>
+            <li><span class="k">Best hit</span><span class="v" id="t-best-hit">0</span></li>
+            <li><span class="k">Demos</span><span class="v" id="t-demos">0</span></li>
+            <li><span class="k">Win streak</span><span class="v" id="t-streak">0</span></li>
+          </ul>
+        </div>
+      </section>
+    </main>
+
+    <script src="/static/overlay.js" defer></script>
   </body>
 </html>
