@@ -295,3 +295,133 @@ def test_coach_stats_last_match_includes_derived_fields(tmp_path):
     assert last["shot_accuracy"] == 40
     assert last["air_touch_pct"] == 25
     assert last["duration_min"] == 8
+
+
+# ── Statfeed highlight columns ───────────────────────────────────────────────
+
+
+# T14/T15/T16: save_match persists highlight columns, round-trip via SELECT
+def test_save_match_persists_highlight_columns(tmp_path):
+    db = open_db(tmp_path / "stats.db")
+    snap = make_snapshot(
+        epic_saves=2, hat_tricks=1, aerial_goals=3, bicycle_goals=0,
+        long_goals=1, centers=4, pool_shots=0, saviors=2, mvps=1,
+    )
+    save_match(db, snap)
+
+    row = db.execute(
+        "SELECT epic_saves, hat_tricks, aerial_goals, bicycle_goals, long_goals, "
+        "centers, pool_shots, saviors, mvps FROM matches WHERE match_guid='M1'"
+    ).fetchone()
+    assert row == (2, 1, 3, 0, 1, 4, 0, 2, 1)
+
+
+# T16: highlights default to 0 when not provided in snapshot
+def test_save_match_highlight_columns_default_to_zero(tmp_path):
+    db = open_db(tmp_path / "stats.db")
+    # make_snapshot does not include highlight keys — must default to 0
+    save_match(db, make_snapshot())
+
+    row = db.execute(
+        "SELECT epic_saves, hat_tricks, aerial_goals, bicycle_goals, long_goals, "
+        "centers, pool_shots, saviors, mvps FROM matches WHERE match_guid='M1'"
+    ).fetchone()
+    assert row == (0, 0, 0, 0, 0, 0, 0, 0, 0)
+
+
+# T17: rolling_avg exposes the 9 highlight averages
+def test_rolling_avg_includes_highlight_averages(tmp_path):
+    db = open_db(tmp_path / "stats.db")
+    from datetime import datetime, timedelta
+
+    base = datetime.now().astimezone()
+    save_match(db, make_snapshot(
+        match_guid="A",
+        started_at=(base - timedelta(hours=2)).isoformat(),
+        ended_at=(base - timedelta(hours=1)).isoformat(),
+        epic_saves=2, hat_tricks=0, aerial_goals=1, bicycle_goals=0,
+        long_goals=0, centers=2, pool_shots=0, saviors=1, mvps=0,
+    ))
+    save_match(db, make_snapshot(
+        match_guid="B",
+        started_at=(base - timedelta(hours=4)).isoformat(),
+        ended_at=(base - timedelta(hours=3)).isoformat(),
+        epic_saves=0, hat_tricks=1, aerial_goals=1, bicycle_goals=0,
+        long_goals=0, centers=0, pool_shots=0, saviors=1, mvps=0,
+    ))
+
+    result = coach_stats(db, "Steam|1|0")
+    avg = result["rolling_avg"]
+    # avg epic_saves: (2+0)/2 = 1.0, but the latest match is excluded from avg
+    # With 2 matches, last_match is A (most recent) and avg window uses B only
+    assert "epic_saves" in avg
+    assert "hat_tricks" in avg
+    assert "saviors" in avg
+    # B: epic_saves=0, hat_tricks=1, saviors=1
+    assert avg["epic_saves"] == 0.0
+    assert avg["hat_tricks"] == 1.0
+    assert avg["saviors"] == 1.0
+
+
+# T18: migration test — DB without highlight columns gets them added
+def test_migration_adds_highlight_columns_to_existing_db(tmp_path):
+    import sqlite3
+
+    db_path = tmp_path / "old.db"
+    # Create a DB with the OLD schema (no highlight columns)
+    conn = sqlite3.connect(str(db_path))
+    conn.execute("""
+        CREATE TABLE matches (
+            id INTEGER PRIMARY KEY,
+            match_guid TEXT NOT NULL,
+            player_id TEXT NOT NULL,
+            player_name TEXT,
+            started_at TEXT NOT NULL,
+            ended_at TEXT NOT NULL,
+            blue_score INTEGER,
+            orange_score INTEGER,
+            me_team INTEGER,
+            won INTEGER,
+            score INTEGER,
+            goals INTEGER,
+            shots INTEGER,
+            saves INTEGER,
+            assists INTEGER,
+            demos INTEGER,
+            demos_taken INTEGER,
+            touches INTEGER,
+            boost_avg REAL,
+            aerial_touches INTEGER DEFAULT 0,
+            fast_aerials INTEGER DEFAULT 0,
+            UNIQUE(match_guid, player_id)
+        )
+    """)
+    # Insert an existing row to verify data is preserved
+    conn.execute(
+        "INSERT INTO matches (match_guid, player_id, started_at, ended_at, "
+        "aerial_touches, fast_aerials) VALUES (?, ?, ?, ?, ?, ?)",
+        ("OLD_MATCH", "Steam|1|0", "2026-01-01T00:00:00+00:00",
+         "2026-01-01T00:05:00+00:00", 5, 2),
+    )
+    conn.commit()
+    conn.close()
+
+    # Open with our open_db — must migrate without data loss
+    migrated = open_db(db_path)
+    columns = {row[1] for row in migrated.execute("PRAGMA table_info(matches)")}
+
+    for col in ("epic_saves", "hat_tricks", "aerial_goals", "bicycle_goals",
+                "long_goals", "centers", "pool_shots", "saviors", "mvps"):
+        assert col in columns, f"column {col!r} missing after migration"
+
+    # Existing data preserved
+    row = migrated.execute(
+        "SELECT aerial_touches, fast_aerials FROM matches WHERE match_guid='OLD_MATCH'"
+    ).fetchone()
+    assert row == (5, 2)
+
+    # New columns default to 0 for the old row
+    row2 = migrated.execute(
+        "SELECT epic_saves, hat_tricks FROM matches WHERE match_guid='OLD_MATCH'"
+    ).fetchone()
+    assert row2 == (0, 0)

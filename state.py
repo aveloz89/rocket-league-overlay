@@ -3,9 +3,12 @@ aerials and identity detection from the RL Stats API event stream."""
 
 from __future__ import annotations
 
+import logging
 import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
+
+log = logging.getLogger(__name__)
 
 # RL "Speed" in the stats API is uu/s / 100. Supersonic in-game = 2200 uu/s.
 SUPERSONIC_THRESHOLD = 22.0
@@ -31,6 +34,22 @@ LAST_TOUCH_NONE = "none"
 LAST_TOUCH_SELF = "self"
 LAST_TOUCH_TEAM = "team"
 LAST_TOUCH_OPPONENT = "opp"
+
+# Allowlist of StatfeedEvent names → MatchAggregator attribute.
+# Keys are lowercase for case-insensitive lookup.
+_STATFEED_EVENTS: dict[str, str] = {
+    "epicsave": "epic_saves",
+    "hattrick": "hat_tricks",
+    "aerialgoal": "aerial_goals",
+    "bicyclegoal": "bicycle_goals",
+    "longgoal": "long_goals",
+    "center": "centers",
+    "centeringball": "centers",
+    "poolshot": "pool_shots",
+    "saviour": "saviors",
+    "savior": "saviors",
+    "mvp": "mvps",
+}
 
 
 def _norm_y(y: float, team: int) -> float:
@@ -100,6 +119,17 @@ class MatchAggregator:
     _takeoff_at: float | None = field(default=None, repr=False)
     _takeoff_boost: int = field(default=0, repr=False)
     _fast_aerial_counted: bool = field(default=False, repr=False)
+
+    # Statfeed highlights
+    epic_saves: int = 0
+    hat_tricks: int = 0
+    aerial_goals: int = 0
+    bicycle_goals: int = 0
+    long_goals: int = 0
+    centers: int = 0
+    pool_shots: int = 0
+    saviors: int = 0
+    mvps: int = 0
 
     # Match context
     blue_score: int = 0
@@ -252,6 +282,47 @@ class MatchAggregator:
             else:
                 self.last_touch_kind = LAST_TOUCH_OPPONENT
             self.last_touch_name = hitter_name
+
+    def on_statfeed_event(self, data: dict) -> None:
+        """Increment a highlight counter when the user is the causer.
+
+        Drops the event silently if: in replay, no match active, no causer,
+        causer is not the user, or event name is not in the allowlist
+        (logged at DEBUG for future allowlist expansion).
+        """
+        if self.in_replay:
+            return
+        if self.match_guid is None:
+            return
+
+        event_name = data.get("Event")
+        if not event_name:
+            return
+
+        causer = data.get("Causer") or {}
+        causer_id = causer.get("PrimaryId")
+        causer_name = causer.get("Name")
+
+        if not causer_id and not causer_name:
+            return
+
+        if not self._is_me(causer_id, causer_name):
+            return
+
+        attr = _STATFEED_EVENTS.get(event_name.lower())
+        if attr is None:
+            log.debug("statfeed event not in allowlist: %s (causer=%s)", event_name, causer_name)
+            return
+
+        setattr(self, attr, getattr(self, attr) + 1)
+
+    def _is_me(self, causer_id: str | None, causer_name: str | None) -> bool:
+        """Return True if causer matches the identified user (id preferred, name fallback)."""
+        if self.me_id and causer_id == self.me_id:
+            return True
+        if self.me_name and causer_name == self.me_name:
+            return True
+        return False
 
     def _track_boost_pickup(self, me: dict, boost_now: int) -> None:
         prev = self._prev_boost
@@ -547,4 +618,13 @@ class MatchAggregator:
             "boost_stolen": self.boost_stolen,
             "aerial_touches": self.aerial_touches,
             "fast_aerials": self.fast_aerials,
+            "epic_saves": self.epic_saves,
+            "hat_tricks": self.hat_tricks,
+            "aerial_goals": self.aerial_goals,
+            "bicycle_goals": self.bicycle_goals,
+            "long_goals": self.long_goals,
+            "centers": self.centers,
+            "pool_shots": self.pool_shots,
+            "saviors": self.saviors,
+            "mvps": self.mvps,
         }

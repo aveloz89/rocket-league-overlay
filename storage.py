@@ -64,6 +64,15 @@ CREATE TABLE IF NOT EXISTS matches (
     boost_stolen INTEGER DEFAULT 0,
     aerial_touches INTEGER DEFAULT 0,
     fast_aerials INTEGER DEFAULT 0,
+    epic_saves INTEGER DEFAULT 0,
+    hat_tricks INTEGER DEFAULT 0,
+    aerial_goals INTEGER DEFAULT 0,
+    bicycle_goals INTEGER DEFAULT 0,
+    long_goals INTEGER DEFAULT 0,
+    centers INTEGER DEFAULT 0,
+    pool_shots INTEGER DEFAULT 0,
+    saviors INTEGER DEFAULT 0,
+    mvps INTEGER DEFAULT 0,
     UNIQUE(match_guid, player_id)
 );
 """
@@ -84,6 +93,15 @@ _NEW_COLUMNS: list[tuple[str, str]] = [
     ("boost_stolen", "INTEGER DEFAULT 0"),
     ("aerial_touches", "INTEGER DEFAULT 0"),
     ("fast_aerials", "INTEGER DEFAULT 0"),
+    ("epic_saves", "INTEGER DEFAULT 0"),
+    ("hat_tricks", "INTEGER DEFAULT 0"),
+    ("aerial_goals", "INTEGER DEFAULT 0"),
+    ("bicycle_goals", "INTEGER DEFAULT 0"),
+    ("long_goals", "INTEGER DEFAULT 0"),
+    ("centers", "INTEGER DEFAULT 0"),
+    ("pool_shots", "INTEGER DEFAULT 0"),
+    ("saviors", "INTEGER DEFAULT 0"),
+    ("mvps", "INTEGER DEFAULT 0"),
 ]
 
 
@@ -127,10 +145,13 @@ def save_match(conn: sqlite3.Connection, snapshot: dict) -> bool:
             hardest_hit, ball_hits, avg_shot_power, boost_wasted_pct, possession_pct,
             score_per_min, time_def_third_pct, time_off_third_pct, behind_ball_pct,
             last_back_pct, dist_to_ball_avg, big_pads, small_pads, boost_stolen,
-            aerial_touches, fast_aerials
+            aerial_touches, fast_aerials,
+            epic_saves, hat_tricks, aerial_goals, bicycle_goals, long_goals,
+            centers, pool_shots, saviors, mvps
         ) VALUES (
             ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-            ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+            ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+            ?, ?, ?, ?, ?, ?, ?, ?, ?
         )
         """,
         (
@@ -171,6 +192,15 @@ def save_match(conn: sqlite3.Connection, snapshot: dict) -> bool:
             snapshot.get("boost_stolen", 0),
             snapshot.get("aerial_touches", 0),
             snapshot.get("fast_aerials", 0),
+            snapshot.get("epic_saves", 0),
+            snapshot.get("hat_tricks", 0),
+            snapshot.get("aerial_goals", 0),
+            snapshot.get("bicycle_goals", 0),
+            snapshot.get("long_goals", 0),
+            snapshot.get("centers", 0),
+            snapshot.get("pool_shots", 0),
+            snapshot.get("saviors", 0),
+            snapshot.get("mvps", 0),
         ),
     )
     conn.commit()
@@ -343,7 +373,16 @@ def _rolling_avg(
             AVG(boost_stolen) AS boost_stolen,
             AVG(aerial_touches) AS aerial_touches,
             AVG(fast_aerials) AS fast_aerials,
-            AVG(ball_hits) AS ball_hits
+            AVG(ball_hits) AS ball_hits,
+            AVG(epic_saves) AS epic_saves,
+            AVG(hat_tricks) AS hat_tricks,
+            AVG(aerial_goals) AS aerial_goals,
+            AVG(bicycle_goals) AS bicycle_goals,
+            AVG(long_goals) AS long_goals,
+            AVG(centers) AS centers,
+            AVG(pool_shots) AS pool_shots,
+            AVG(saviors) AS saviors,
+            AVG(mvps) AS mvps
         FROM (
             SELECT * FROM matches
             WHERE player_id = ?

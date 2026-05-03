@@ -209,6 +209,10 @@ def handle_event(event: dict) -> None:
         _broadcast_match()
         return
 
+    if name == "StatfeedEvent":
+        agg.on_statfeed_event(data)
+        return
+
     if name in MATCH_END_EVENTS:
         _persist_current_match()
         _broadcast_today()

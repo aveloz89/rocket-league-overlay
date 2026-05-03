@@ -438,3 +438,97 @@ def test_hub_caches_coach_payload_for_late_subscribers():
         received.append(json.loads(queue.get_nowait()))
 
     assert any(m["type"] == "coach" for m in received)
+
+
+# ── StatfeedEvent dispatch ───────────────────────────────────────────────────
+
+
+# T19: handle_event with StatfeedEvent calls agg.on_statfeed_event
+def test_handle_statfeed_event_increments_counter(fresh_state):
+    app.agg.me_id, app.agg.me_name = "Steam|1|0", "alas"
+    app.handle_event({"Event": "Initialized", "Data": {"MatchGuid": "M1"}})
+
+    app.handle_event({
+        "Event": "StatfeedEvent",
+        "Data": {
+            "MatchGuid": "M1",
+            "Event": "EpicSave",
+            "Causer": {"Name": "alas", "PrimaryId": "Steam|1|0", "TeamNum": 0},
+            "Victim": {"Name": "jstn", "PrimaryId": "Epic|2|0", "TeamNum": 1},
+        },
+    })
+
+    assert app.agg.epic_saves == 1
+
+
+def test_handle_statfeed_event_no_broadcast(fresh_state):
+    """StatfeedEvent must NOT trigger a match broadcast (no WS noise mid-game)."""
+    app.agg.me_id, app.agg.me_name = "Steam|1|0", "alas"
+    app.handle_event({"Event": "Initialized", "Data": {"MatchGuid": "M1"}})
+
+    # Capture hub state before and after
+    before_latest = dict(app.hub._latest)
+
+    app.handle_event({
+        "Event": "StatfeedEvent",
+        "Data": {
+            "MatchGuid": "M1",
+            "Event": "EpicSave",
+            "Causer": {"Name": "alas", "PrimaryId": "Steam|1|0", "TeamNum": 0},
+            "Victim": {"Name": "jstn", "PrimaryId": "Epic|2|0", "TeamNum": 1},
+        },
+    })
+
+    # "match" key must be unchanged — no broadcast was made by statfeed handler
+    assert app.hub._latest.get("match") == before_latest.get("match")
+
+
+# T20: integration — full match with statfeed events → coach_stats exposes counters
+def test_integration_statfeed_persisted_in_coach_stats(fresh_state):
+    """A complete match flow with StatfeedEvents results in highlights in coach_stats."""
+    app.agg.me_id, app.agg.me_name = "Steam|1|0", "alas"
+    app.handle_event({"Event": "Initialized", "Data": {"MatchGuid": "M1"}})
+
+    # One UpdateState so started_at is set and player identity confirmed
+    app.handle_event({
+        "Event": "UpdateState",
+        "Data": {
+            "MatchGuid": "M1",
+            "Players": [{"Name": "alas", "PrimaryId": "Steam|1|0", "TeamNum": 0,
+                         "Score": 100, "Goals": 1, "Shots": 2, "Saves": 1,
+                         "Assists": 0, "Demos": 0, "Touches": 5, "Boost": 50,
+                         "Speed": 0, "bOnGround": True, "bHasCar": True}],
+            "Game": {"Teams": [{"TeamNum": 0, "Score": 1}, {"TeamNum": 1, "Score": 0}],
+                     "TimeSeconds": 290, "bOvertime": False, "bReplay": False,
+                     "Arena": "stadium", "bHasTarget": False},
+        },
+    })
+
+    # Statfeed events arrive during the match
+    for _ in range(2):
+        app.handle_event({
+            "Event": "StatfeedEvent",
+            "Data": {
+                "MatchGuid": "M1",
+                "Event": "EpicSave",
+                "Causer": {"Name": "alas", "PrimaryId": "Steam|1|0", "TeamNum": 0},
+                "Victim": {"Name": "jstn", "PrimaryId": "Epic|2|0", "TeamNum": 1},
+            },
+        })
+    app.handle_event({
+        "Event": "StatfeedEvent",
+        "Data": {
+            "MatchGuid": "M1",
+            "Event": "HatTrick",
+            "Causer": {"Name": "alas", "PrimaryId": "Steam|1|0", "TeamNum": 0},
+            "Victim": None,
+        },
+    })
+
+    app.handle_event({"Event": "MatchEnded", "Data": {"MatchGuid": "M1"}})
+
+    from storage import coach_stats
+    result = coach_stats(app.db, "Steam|1|0")
+    last = result["last_match"]
+    assert last["epic_saves"] == 2
+    assert last["hat_tricks"] == 1
