@@ -5,7 +5,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from tcp_client import parse_json_objects, stream_events  # noqa: E402
+from tcp_client import _decode_data_field, parse_json_objects, stream_events  # noqa: E402
 
 FIXTURES = Path(__file__).parent / "fixtures"
 
@@ -73,6 +73,40 @@ def test_parse_returns_no_events_on_pure_whitespace():
 
     assert events == []
     assert leftover == ""
+
+
+def test_parse_decodes_string_encoded_data_field():
+    """RL wraps the Data payload as a JSON-encoded string, not a nested object."""
+    inner = '{"MatchGuid":"M1","Players":[{"Name":"alas"}]}'
+    raw = json.dumps({"Event": "BallHit", "Data": inner})
+
+    events, leftover = parse_json_objects(raw, _decoder())
+
+    assert leftover == ""
+    assert len(events) == 1
+    assert events[0]["Event"] == "BallHit"
+    # Data must arrive as a dict for the handler chain (data.get(...))
+    assert isinstance(events[0]["Data"], dict)
+    assert events[0]["Data"]["MatchGuid"] == "M1"
+    assert events[0]["Data"]["Players"][0]["Name"] == "alas"
+
+
+def test_decode_data_field_leaves_dict_data_untouched():
+    """Defensive: if a fixture or future RL build sends Data as a real dict,
+    don't try to re-decode it."""
+    event = {"Event": "BallHit", "Data": {"MatchGuid": "M1"}}
+
+    out = _decode_data_field(event)
+
+    assert out["Data"] == {"MatchGuid": "M1"}
+
+
+def test_decode_data_field_leaves_string_in_place_when_inner_invalid():
+    event = {"Event": "BallHit", "Data": "{not json"}
+
+    out = _decode_data_field(event)
+
+    assert out["Data"] == "{not json"
 
 
 def test_stream_events_yields_minified_back_to_back():

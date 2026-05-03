@@ -13,6 +13,22 @@ EventHandler = Callable[[dict], Awaitable[None]]
 MAX_BUFFER_CHARS = 1_000_000
 
 
+def _decode_data_field(event: dict) -> dict:
+    """RL ships the inner Data payload as a JSON-encoded string, not a nested
+    object — so handlers see e.g. {"Event": "BallHit", "Data": "{...}"}.
+    Decode it once here so the rest of the app can rely on dict semantics.
+    """
+    data = event.get("Data")
+    if isinstance(data, str):
+        try:
+            event["Data"] = json.loads(data)
+        except json.JSONDecodeError:
+            # Leave the string in place; handle_event's exception guard will
+            # drop the malformed event without taking down the pump.
+            pass
+    return event
+
+
 def parse_json_objects(
     buffer: str, decoder: json.JSONDecoder
 ) -> tuple[list[dict], str]:
@@ -40,9 +56,11 @@ def parse_json_objects(
             # Incomplete object — keep what we have and wait for more bytes.
             return events, stripped
         if isinstance(obj, dict):
-            events.append(obj)
+            events.append(_decode_data_field(obj))
         elif isinstance(obj, list):
-            events.extend(item for item in obj if isinstance(item, dict))
+            events.extend(
+                _decode_data_field(item) for item in obj if isinstance(item, dict)
+            )
         buffer = stripped[end:]
 
 
