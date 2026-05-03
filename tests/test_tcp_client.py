@@ -5,75 +5,85 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from tcp_client import split_json_lines, stream_events  # noqa: E402
+from tcp_client import parse_json_objects, stream_events  # noqa: E402
 
 FIXTURES = Path(__file__).parent / "fixtures"
 
 
-def test_split_complete_lines():
-    payload = (FIXTURES / "update_state.json").read_text()
-    minified = json.dumps(json.loads(payload))
-    buffer = (minified + "\n" + minified + "\n").encode()
+def _decoder() -> json.JSONDecoder:
+    return json.JSONDecoder()
 
-    events, leftover = split_json_lines(buffer)
 
-    assert len(events) == 2
-    assert leftover == b""
+def test_parse_objects_back_to_back_no_separator():
+    """Two minified objects glued together — what RL actually sends in practice."""
+    a = json.dumps({"Event": "UpdateState", "Data": {"MatchGuid": "A"}})
+    b = json.dumps({"Event": "BallHit", "Data": {"MatchGuid": "A"}})
+
+    events, leftover = parse_json_objects(a + b, _decoder())
+
+    assert leftover == ""
+    assert [e["Event"] for e in events] == ["UpdateState", "BallHit"]
+
+
+def test_parse_objects_with_arbitrary_whitespace():
+    a = json.dumps({"Event": "UpdateState"})
+    b = json.dumps({"Event": "BallHit"})
+
+    events, leftover = parse_json_objects(a + " \n\t " + b + "\n", _decoder())
+
+    assert leftover == ""
+    assert [e["Event"] for e in events] == ["UpdateState", "BallHit"]
+
+
+def test_parse_pretty_printed_object_with_internal_newlines():
+    """The pre-fix code split on \\n, which tore pretty-printed objects apart."""
+    payload = (FIXTURES / "update_state.json").read_text()  # multi-line indented JSON
+
+    events, leftover = parse_json_objects(payload, _decoder())
+
+    assert leftover == ""
+    assert len(events) == 1
     assert events[0]["Event"] == "UpdateState"
     assert events[0]["Data"]["Game"]["Teams"][0]["Name"] == "Blue"
 
 
-def test_split_keeps_partial_tail():
+def test_parse_keeps_partial_tail_for_next_read():
     full = json.dumps({"Event": "UpdateState", "Data": {}})
-    partial = json.dumps({"Event": "BallHit"})[:20]
-    buffer = (full + "\n" + partial).encode()
+    partial_head = '{"Event": "BallH'
 
-    events, leftover = split_json_lines(buffer)
+    events, leftover = parse_json_objects(full + partial_head, _decoder())
 
     assert len(events) == 1
-    assert leftover.decode() == partial
+    assert leftover == partial_head
 
 
-def test_split_drops_invalid_line_but_continues():
-    valid = json.dumps({"Event": "UpdateState", "Data": {}})
-    buffer = (valid + "\n{not json}\n" + valid + "\n").encode()
+def test_parse_top_level_array_is_flattened_into_objects():
+    """The fixtures include a BallHit array; some Stats API entries arrive batched."""
+    payload = (FIXTURES / "ball_hit_array.json").read_text()
 
-    events, leftover = split_json_lines(buffer)
+    events, leftover = parse_json_objects(payload, _decoder())
 
-    assert leftover == b""
+    assert leftover == ""
     assert len(events) == 2
+    assert all(e["Event"] == "BallHit" for e in events)
 
 
-def test_split_skips_empty_lines():
-    valid = json.dumps({"Event": "UpdateState"})
-    buffer = (valid + "\n\n\n" + valid + "\n").encode()
-
-    events, _ = split_json_lines(buffer)
-
-    assert len(events) == 2
-
-
-def test_split_drops_buffer_when_exceeds_max_line_size():
-    """If the source sends a huge blob without a newline, we drop it instead of
-    growing the buffer unbounded."""
-    from tcp_client import MAX_LINE_BYTES
-
-    huge = b"x" * (MAX_LINE_BYTES + 100)
-    events, leftover = split_json_lines(huge)
+def test_parse_returns_no_events_on_pure_whitespace():
+    events, leftover = parse_json_objects("   \n\n  \t  ", _decoder())
 
     assert events == []
-    assert leftover == b""
+    assert leftover == ""
 
 
-def test_stream_events_yields_from_fake_server():
+def test_stream_events_yields_minified_back_to_back():
     sample = {"Event": "UpdateState", "Data": {"MatchGuid": "abc"}}
 
     async def runner():
-        # Spin up a dummy TCP server that emits 3 lines and closes
         async def serve(_reader, writer):
-            for _ in range(3):
-                writer.write((json.dumps(sample) + "\n").encode())
-                await writer.drain()
+            # Three objects with no separator at all — the worst case the old
+            # newline parser failed on silently in production.
+            writer.write((json.dumps(sample) * 3).encode())
+            await writer.drain()
             writer.close()
 
         server = await asyncio.start_server(serve, "127.0.0.1", 0)
@@ -93,3 +103,30 @@ def test_stream_events_yields_from_fake_server():
     assert len(result) == 3
     assert all(e["Event"] == "UpdateState" for e in result)
     assert result[0]["Data"]["MatchGuid"] == "abc"
+
+
+def test_stream_events_yields_pretty_printed():
+    """Real RL traffic is pretty-printed; verify the end-to-end pump handles it."""
+
+    async def runner():
+        async def serve(_reader, writer):
+            payload = (FIXTURES / "update_state.json").read_text()
+            writer.write(payload.encode())
+            await writer.drain()
+            writer.close()
+
+        server = await asyncio.start_server(serve, "127.0.0.1", 0)
+        port = server.sockets[0].getsockname()[1]
+
+        async with server:
+            received: list[dict] = []
+            agen = stream_events(host="127.0.0.1", port=port, reconnect_delay=0.01)
+            async for event in agen:
+                received.append(event)
+                await agen.aclose()
+                break
+            return received
+
+    result = asyncio.run(runner())
+    assert len(result) == 1
+    assert result[0]["Event"] == "UpdateState"

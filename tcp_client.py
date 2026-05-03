@@ -7,34 +7,43 @@ log = logging.getLogger(__name__)
 
 EventHandler = Callable[[dict], Awaitable[None]]
 
-# A single Stats API event fits comfortably under ~10 KB. Cap at 1 MB to bound
-# memory if a misbehaving (or malicious) source on the local TCP port sends
-# data without newlines.
-MAX_LINE_BYTES = 1_000_000
+# Runaway-buffer guard. The Stats API does not document a max event size, but
+# in practice they fit in a few KB. If we accumulate more than this without
+# producing a parsable object, the stream is corrupt — drop and resync.
+MAX_BUFFER_CHARS = 1_000_000
 
 
-def split_json_lines(buffer: bytes) -> tuple[list[dict], bytes]:
-    """Split a TCP buffer into JSON objects, returning leftover bytes.
+def parse_json_objects(
+    buffer: str, decoder: json.JSONDecoder
+) -> tuple[list[dict], str]:
+    """Extract zero or more JSON objects from a string buffer.
 
-    The Stats API emits one JSON object per line, but a TCP read can land
-    in the middle of a line — leftover is kept for the next read.
+    The Stats API streams JSON values separated by arbitrary whitespace
+    (often pretty-printed with embedded newlines), not by a single newline
+    terminator. Splitting on '\\n' would either tear individual objects
+    apart or — with no newlines at all — let the buffer grow until our
+    runaway guard drops it. We use streaming raw_decode instead, matching
+    what the reference clients (manucabral/RocketLeagueStatsAPI in Python,
+    xentrick/rlstatsapi in Rust) do.
+
+    Returns parsed objects and the leftover unparsed tail (a partial
+    object waiting for more bytes from the socket).
     """
     events: list[dict] = []
     while True:
-        nl = buffer.find(b"\n")
-        if nl == -1:
-            if len(buffer) > MAX_LINE_BYTES:
-                log.warning("line buffer exceeded %d bytes without newline — dropping", MAX_LINE_BYTES)
-                return events, b""
-            return events, buffer
-        line = buffer[:nl].strip()
-        buffer = buffer[nl + 1 :]
-        if not line:
-            continue
+        stripped = buffer.lstrip()
+        if not stripped:
+            return events, ""
         try:
-            events.append(json.loads(line))
-        except json.JSONDecodeError as exc:
-            log.warning("invalid JSON line dropped: %s", exc)
+            obj, end = decoder.raw_decode(stripped)
+        except json.JSONDecodeError:
+            # Incomplete object — keep what we have and wait for more bytes.
+            return events, stripped
+        if isinstance(obj, dict):
+            events.append(obj)
+        elif isinstance(obj, list):
+            events.extend(item for item in obj if isinstance(item, dict))
+        buffer = stripped[end:]
 
 
 async def stream_events(
@@ -46,6 +55,7 @@ async def stream_events(
 
     The game closes the socket between matches, so we loop forever.
     """
+    decoder = json.JSONDecoder()
     while True:
         try:
             log.info("connecting to %s:%d", host, port)
@@ -56,17 +66,23 @@ async def stream_events(
             continue
 
         log.info("connected")
-        buffer = b""
+        buffer = ""
         try:
             while True:
                 chunk = await reader.read(4096)
                 if not chunk:
                     log.info("socket closed by game")
                     break
-                buffer += chunk
-                events, buffer = split_json_lines(buffer)
+                buffer += chunk.decode("utf-8", errors="replace")
+                events, buffer = parse_json_objects(buffer, decoder)
                 for event in events:
                     yield event
+                if len(buffer) > MAX_BUFFER_CHARS:
+                    log.warning(
+                        "buffer exceeded %d chars without parsing an object — dropping",
+                        MAX_BUFFER_CHARS,
+                    )
+                    buffer = ""
         except (ConnectionError, asyncio.IncompleteReadError) as exc:
             log.warning("read error: %s", exc)
         finally:
