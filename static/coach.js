@@ -18,28 +18,28 @@
   // Layout: [{key, label, suffix, source: "last_match" | "rolling_avg", direction}]
   // direction: "high_good" / "low_good" / "neutral" — controls the trend arrow color.
   const POSITIONING_ROWS = [
-    { key: "time_def_third_pct", label: "Tercio defensivo", suffix: "%", direction: "neutral" },
-    { key: "time_off_third_pct", label: "Tercio ofensivo", suffix: "%", direction: "neutral" },
-    { key: "behind_ball_pct", label: "Detrás del balón", suffix: "%", direction: "high_good" },
-    { key: "last_back_pct", label: "Último hombre", suffix: "%", direction: "neutral" },
-    { key: "dist_to_ball_avg", label: "Distancia balón", suffix: "", direction: "neutral" },
+    { key: "time_def_third_pct", label: "Defensive third", suffix: "%", direction: "neutral" },
+    { key: "time_off_third_pct", label: "Offensive third", suffix: "%", direction: "neutral" },
+    { key: "behind_ball_pct", label: "Behind ball", suffix: "%", direction: "high_good" },
+    { key: "last_back_pct", label: "Last back", suffix: "%", direction: "neutral" },
+    { key: "dist_to_ball_avg", label: "Ball distance", suffix: "", direction: "neutral" },
   ];
 
   const BOOST_ROWS = [
     { key: "big_pads", label: "Big pads", suffix: "", direction: "high_good" },
     { key: "small_pads", label: "Small pads", suffix: "", direction: "high_good" },
-    { key: "boost_stolen", label: "Robado en mitad rival", suffix: "", direction: "high_good" },
+    { key: "boost_stolen", label: "Stolen in opp half", suffix: "", direction: "high_good" },
     { key: "boost_avg", label: "Avg boost", suffix: "", direction: "high_good" },
     { key: "boost_wasted_pct", label: "Wasted", suffix: "%", direction: "low_good" },
-    { key: "time_zero_boost_pct", label: "Sin boost", suffix: "%", direction: "low_good" },
+    { key: "time_zero_boost_pct", label: "Zero boost", suffix: "%", direction: "low_good" },
   ];
 
   const MECH_ROWS = [
-    { key: "aerial_touches", label: "Toques aéreos", suffix: "", direction: "high_good" },
-    { key: "air_touch_pct", label: "% toques aéreos", suffix: "%", direction: "high_good" },
+    { key: "aerial_touches", label: "Aerial touches", suffix: "", direction: "high_good" },
+    { key: "air_touch_pct", label: "Aerial touch %", suffix: "%", direction: "high_good" },
     { key: "fast_aerials", label: "Fast aerials", suffix: "", direction: "high_good" },
-    { key: "time_supersonic_pct", label: "Supersónico", suffix: "%", direction: "high_good" },
-    { key: "time_airborne_pct", label: "En el aire", suffix: "%", direction: "high_good" },
+    { key: "time_supersonic_pct", label: "Supersonic", suffix: "%", direction: "high_good" },
+    { key: "time_airborne_pct", label: "Airborne", suffix: "%", direction: "high_good" },
     { key: "hardest_hit", label: "Hardest hit", suffix: "", direction: "high_good" },
   ];
 
@@ -59,8 +59,8 @@
     { key: "win_rate", label: "Win rate", suffix: "%", direction: "high_good" },
     { key: "score_per_min", label: "Score/min", suffix: "", direction: "high_good" },
     { key: "shot_accuracy", label: "Shot accuracy", suffix: "%", direction: "high_good" },
-    { key: "behind_ball_pct", label: "Detrás del balón", suffix: "%", direction: "high_good" },
-    { key: "possession_pct", label: "Posesión", suffix: "%", direction: "high_good" },
+    { key: "behind_ball_pct", label: "Behind ball", suffix: "%", direction: "high_good" },
+    { key: "possession_pct", label: "Possession", suffix: "%", direction: "high_good" },
   ];
 
   const fmt = (val, suffix) => {
@@ -241,7 +241,7 @@
     }
     todayBar.hidden = false;
     $("today-matches").textContent = today.matches;
-    $("today-record").textContent = `${today.wins}V ${today.losses}D`;
+    $("today-record").textContent = `${today.wins}W ${today.losses}L`;
     $("today-winrate").textContent = `${today.win_rate}%`;
     $("today-streak").textContent = today.win_streak;
     $("today-best").textContent = today.best_score;
@@ -269,10 +269,10 @@
     const myScore = last.me_team === 0 ? last.blue_score : last.orange_score;
     const oppScore = last.me_team === 0 ? last.orange_score : last.blue_score;
     if (last.won === true) {
-      result.textContent = `V ${myScore}-${oppScore}`;
+      result.textContent = `W ${myScore}-${oppScore}`;
       result.dataset.outcome = "win";
     } else if (last.won === false) {
-      result.textContent = `D ${myScore}-${oppScore}`;
+      result.textContent = `L ${myScore}-${oppScore}`;
       result.dataset.outcome = "loss";
     } else {
       result.textContent = `${last.blue_score ?? 0}-${last.orange_score ?? 0}`;
@@ -323,7 +323,7 @@
       if (msg.type === "coach" && msg.data) render(msg.data);
     };
     socket.onclose = () => {
-      setConn("disconnected", "reconectando…");
+      setConn("disconnected", "reconnecting…");
       setTimeout(connect, retryDelay);
       retryDelay = Math.min(retryDelay * 2, 30000);
     };

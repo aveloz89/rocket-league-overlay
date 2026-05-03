@@ -224,7 +224,7 @@ def test_coach_stats_generates_insights_when_last_is_worse(tmp_path):
     text_blob = " ".join(result["insights"])
     assert any(
         phrase in text_blob.lower()
-        for phrase in ["shot accuracy", "posesión", "score/min", "boost wasted", "sin boost"]
+        for phrase in ["shot accuracy", "possession", "score/min", "boost wasted", "zero boost"]
     )
 
 
