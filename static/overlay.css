@@ -250,7 +250,9 @@ button:focus-visible {
 
 .me-line {
   display: flex;
+  flex-wrap: wrap;
   justify-content: center;
+  align-items: baseline;
   gap: var(--space-2);
   color: var(--muted);
   font-size: 0.75rem;
@@ -258,6 +260,29 @@ button:focus-visible {
 }
 .me-line #me-name { color: var(--fg); font-weight: 600; }
 .me-line .dot::before { content: "•"; color: var(--muted); }
+
+.live-pill {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0.25rem;
+}
+.live-pill .pill-k {
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  font-size: 0.625rem;
+  font-weight: 700;
+  color: var(--muted);
+}
+.live-pill .pill-v {
+  color: var(--fg);
+  font-weight: 800;
+  font-size: 0.875rem;
+}
+.live-pill .pill-suffix {
+  color: var(--muted);
+  font-size: 0.6875rem;
+  font-weight: 600;
+}
 
 .live-grids {
   display: grid;
