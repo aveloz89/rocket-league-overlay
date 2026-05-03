@@ -289,13 +289,13 @@ def _current_win_streak(conn: sqlite3.Connection, player_id: str) -> int:
 # Insight definitions: (key, label, suffix, direction, advice).
 # direction: +1 = high is good (worse when below avg). -1 = low is good (worse when above avg).
 _INSIGHT_DEFS: list[tuple[str, str, str, int, str]] = [
-    ("shot_accuracy", "Shot accuracy", "%", 1, "más tiros con calma"),
-    ("possession_pct", "Posesión", "%", 1, "luchá más por la pelota"),
-    ("score_per_min", "Score/min", "", 1, "busca acciones de impacto"),
-    ("behind_ball_pct", "Detrás del balón", "%", 1, "estás sobreextendido"),
-    ("time_zero_boost_pct", "Sin boost", "%", -1, "recoge más pads"),
-    ("boost_wasted_pct", "Boost wasted", "%", -1, "no recargues con >50"),
-    ("aerial_touches", "Toques aéreos", "", 1, "atrévete a ir arriba"),
+    ("shot_accuracy", "Shot accuracy", "%", 1, "take calmer shots"),
+    ("possession_pct", "Possession", "%", 1, "fight harder for the ball"),
+    ("score_per_min", "Score/min", "", 1, "go for high-impact actions"),
+    ("behind_ball_pct", "Behind ball", "%", 1, "you're overextending"),
+    ("time_zero_boost_pct", "Zero boost", "%", -1, "pick up more pads"),
+    ("boost_wasted_pct", "Boost wasted", "%", -1, "don't refill above 50"),
+    ("aerial_touches", "Aerial touches", "", 1, "take to the air more"),
 ]
 
 

@@ -1,10 +1,10 @@
 <!doctype html>
-<html lang="es">
+<html lang="en">
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>RL Coach — stats para mejorar</title>
-    <meta name="description" content="Dashboard personal de Rocket League: último partido, posicionamiento, boost y mecánicas vs tu propio promedio." />
+    <title>RL Coach — stats to improve</title>
+    <meta name="description" content="Personal Rocket League dashboard: last match, positioning, boost and mechanics vs your own rolling average." />
     <link rel="stylesheet" href="/static/coach.css" />
   </head>
   <body>
@@ -13,18 +13,18 @@
         <span class="brand">COACH</span>
         <span class="player" id="player-name">—</span>
       </h1>
-      <span class="conn" id="conn" aria-live="polite">conectando…</span>
+      <span class="conn" id="conn" aria-live="polite">connecting…</span>
     </header>
 
     <main class="page-main">
       <section class="empty" id="empty" hidden>
-        <p>Aún no hay partidos registrados.</p>
-        <p class="hint">Inicia Rocket League y juega un partido. Vuelve a esta página al terminar.</p>
+        <p>No matches recorded yet.</p>
+        <p class="hint">Start Rocket League and play a match. Come back here when you're done.</p>
       </section>
 
       <section class="hero" id="hero" hidden aria-labelledby="last-heading">
         <header class="hero-head">
-          <h2 id="last-heading">Último partido</h2>
+          <h2 id="last-heading">Last match</h2>
           <p class="hero-meta">
             <span class="result" id="last-result">—</span>
             <span class="sep" aria-hidden="true">·</span>
@@ -35,21 +35,21 @@
         </header>
         <ul class="insights" id="insights"></ul>
         <p class="insights-empty" id="insights-empty" hidden>
-          Sigue jugando para ver patrones — necesito al menos 5 partidos previos para sugerencias.
+          Keep playing to surface patterns — I need at least 5 prior matches for suggestions.
         </p>
       </section>
 
-      <section class="cats" id="cats" hidden aria-label="Categorías de estadísticas">
+      <section class="cats" id="cats" hidden aria-label="Stat categories">
         <article class="cat">
-          <h2>Posicionamiento</h2>
+          <h2>Positioning</h2>
           <ul class="rows" id="cat-pos"></ul>
         </article>
         <article class="cat">
-          <h2>Boost (avanzado)</h2>
+          <h2>Boost (advanced)</h2>
           <ul class="rows" id="cat-boost"></ul>
         </article>
         <article class="cat">
-          <h2>Mecánica</h2>
+          <h2>Mechanics</h2>
           <ul class="rows" id="cat-mech"></ul>
         </article>
         <article class="cat">
@@ -59,17 +59,17 @@
       </section>
 
       <section class="trend" id="trend-section" hidden aria-labelledby="trend-heading">
-        <h2 id="trend-heading">Tendencia <span class="muted">(últimos 14 días)</span></h2>
+        <h2 id="trend-heading">Trend <span class="muted">(last 14 days)</span></h2>
         <ul class="trend-rows" id="trend-rows"></ul>
       </section>
 
       <section class="today-bar" id="today-bar" hidden aria-labelledby="today-heading">
-        <h2 id="today-heading" class="visually-hidden">Hoy</h2>
-        <span class="today-label">HOY</span>
-        <span><strong id="today-matches">0</strong> partidos</span>
-        <span><strong id="today-record">0V 0D</strong></span>
+        <h2 id="today-heading" class="visually-hidden">Today</h2>
+        <span class="today-label">TODAY</span>
+        <span><strong id="today-matches">0</strong> matches</span>
+        <span><strong id="today-record">0W 0L</strong></span>
         <span><strong id="today-winrate">0%</strong> WR</span>
-        <span><strong id="today-streak">0</strong> racha</span>
+        <span><strong id="today-streak">0</strong> streak</span>
         <span><strong id="today-best">0</strong> best score</span>
       </section>
     </main>
