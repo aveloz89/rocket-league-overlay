@@ -13,6 +13,13 @@
         <span class="brand">COACH</span>
         <span class="player" id="player-name">—</span>
       </h1>
+      <div class="header-scoreline" id="header-scoreline" hidden>
+        <span class="team blue">BLUE</span>
+        <span class="num blue" id="ctx-blue-score">0</span>
+        <span class="clock" id="ctx-clock">5:00</span>
+        <span class="num orange" id="ctx-orange-score">0</span>
+        <span class="team orange">ORANGE</span>
+      </div>
       <label class="rank-picker">
         <span class="visually-hidden">Target rank</span>
         <select id="rank-select">
@@ -40,13 +47,6 @@
         <header class="live-head">
           <h2 id="live-heading">Live match</h2>
           <div class="banner" id="banner" hidden></div>
-          <div class="scoreline">
-            <span class="team blue" id="ctx-blue-team">BLUE</span>
-            <span class="num blue" id="ctx-blue-score">0</span>
-            <span class="clock" id="ctx-clock">5:00</span>
-            <span class="num orange" id="ctx-orange-score">0</span>
-            <span class="team orange" id="ctx-orange-team">ORANGE</span>
-          </div>
           <div class="me-line">
             <span id="me-name">—</span>
             <span class="dot"></span>

@@ -80,9 +80,9 @@ button:focus-visible {
 /* ── Header ─────────────────────────────────────────────────────────── */
 
 .page-header {
-  display: flex;
+  display: grid;
+  grid-template-columns: auto 1fr auto auto;
   align-items: center;
-  justify-content: space-between;
   gap: var(--space-4);
   padding: var(--space-3) var(--space-5);
   border-bottom: 1px solid var(--border);
@@ -90,6 +90,33 @@ button:focus-visible {
   position: sticky;
   top: 0;
   z-index: 1;
+}
+
+.header-scoreline {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-3);
+  font-weight: 700;
+}
+.header-scoreline .team {
+  font-size: 0.625rem;
+  letter-spacing: 0.18em;
+}
+.header-scoreline .blue { color: var(--blue); }
+.header-scoreline .orange { color: var(--orange); }
+.header-scoreline .num {
+  font-size: 1.375rem;
+  min-width: 1.25rem;
+  text-align: center;
+  font-weight: 800;
+  line-height: 1;
+}
+.header-scoreline .clock {
+  color: var(--fg);
+  font-size: 0.9375rem;
+  padding: 0 var(--space-1);
+  font-variant-numeric: tabular-nums;
 }
 
 .page-header h1 {
@@ -220,33 +247,6 @@ button:focus-visible {
 }
 .banner.replay { background: #c084fc; color: #1a1a1a; }
 .banner.overtime { background: var(--bad); color: #fff; }
-
-.scoreline {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: var(--space-4);
-  font-size: 1.25rem;
-  font-weight: 700;
-}
-.scoreline .team {
-  font-size: 0.6875rem;
-  letter-spacing: 0.18em;
-}
-.scoreline .blue { color: var(--blue); }
-.scoreline .orange { color: var(--orange); }
-.scoreline .num {
-  font-size: 1.75rem;
-  min-width: 1.5rem;
-  text-align: center;
-  font-weight: 800;
-}
-.scoreline .clock {
-  color: var(--fg);
-  font-size: 1.125rem;
-  padding: 0 var(--space-2);
-  font-variant-numeric: tabular-nums;
-}
 
 .me-line {
   display: flex;

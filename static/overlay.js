@@ -11,6 +11,7 @@
   const trendSection = $("trend-section");
   const todayDetail = $("today-detail");
   const banner = $("banner");
+  const headerScoreline = $("header-scoreline");
 
   const setConn = (state, label) => {
     conn.dataset.state = state;
@@ -44,6 +45,7 @@
 
   const renderMatch = (snap) => {
     live.hidden = false;
+    headerScoreline.hidden = false;
     const ctx = snap.context || {};
     const m = snap.match || {};
     const me = snap.me || {};
