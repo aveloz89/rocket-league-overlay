@@ -622,3 +622,20 @@ def test_coach_route_redirects_to_root(client):
     resp = client.get("/coach", follow_redirects=False)
     assert resp.status_code == 308
     assert resp.headers["location"] == "/"
+
+
+# ── Cache-Control on shell + assets ──────────────────────────────────────────
+# Stale JS/CSS mixed with a fresh index.html can wedge the dashboard on
+# "connecting…" without any visible error, so we force browsers to revalidate.
+
+
+def test_index_sends_no_cache_header(client):
+    resp = client.get("/")
+    assert resp.status_code == 200
+    assert "no-cache" in resp.headers.get("cache-control", "")
+
+
+def test_static_asset_sends_no_cache_header(client):
+    resp = client.get("/static/overlay.js")
+    assert resp.status_code == 200
+    assert "no-cache" in resp.headers.get("cache-control", "")

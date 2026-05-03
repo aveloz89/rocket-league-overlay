@@ -395,12 +395,27 @@ app.state.tcp_host = "127.0.0.1"
 app.state.tcp_port = 49123
 app.state.demo = False
 
-app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
+# Force browsers to revalidate every asset. ETags/Last-Modified still let the
+# server respond 304 when nothing changed, but the browser can no longer mix
+# a fresh index.html with a stale overlay.js / overlay.css from a prior session
+# — which previously caused a silent JS error that left the dashboard frozen
+# on the "connecting…" placeholder.
+NO_CACHE = "no-cache, must-revalidate"
+
+
+class NoCacheStaticFiles(StaticFiles):
+    async def get_response(self, path: str, scope):  # type: ignore[override]
+        response = await super().get_response(path, scope)
+        response.headers["Cache-Control"] = NO_CACHE
+        return response
+
+
+app.mount("/static", NoCacheStaticFiles(directory=STATIC_DIR), name="static")
 
 
 @app.get("/")
 async def index() -> FileResponse:
-    return FileResponse(STATIC_DIR / "index.html")
+    return FileResponse(STATIC_DIR / "index.html", headers={"Cache-Control": NO_CACHE})
 
 
 @app.get("/coach")

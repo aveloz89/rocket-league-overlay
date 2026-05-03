@@ -17,6 +17,27 @@
     conn.textContent = label;
   };
 
+  // Match snapshots stop arriving when the user is in a menu / queue. Mark the
+  // header as "in match" while they're flowing and fall back to "waiting for
+  // match" if none arrive within MATCH_ACTIVE_TIMEOUT_MS — comfortably above
+  // the 5 s server-side throttle so a normal stream keeps the indicator green.
+  const MATCH_ACTIVE_TIMEOUT_MS = 12000;
+  let matchActiveTimer = null;
+  const markMatchActive = () => {
+    setConn("active", "live · in match");
+    if (matchActiveTimer !== null) clearTimeout(matchActiveTimer);
+    matchActiveTimer = setTimeout(() => {
+      setConn("connected", "live · waiting for match");
+      matchActiveTimer = null;
+    }, MATCH_ACTIVE_TIMEOUT_MS);
+  };
+  const clearMatchActive = () => {
+    if (matchActiveTimer !== null) {
+      clearTimeout(matchActiveTimer);
+      matchActiveTimer = null;
+    }
+  };
+
   // ── Live match render ────────────────────────────────────────────
 
   const ALLOWED_TOUCH = { self: "you", team: "teammate", opp: "opponent", none: null };
@@ -397,7 +418,7 @@
     socket = new WebSocket(url);
     socket.onopen = () => {
       retryDelay = 500;
-      setConn("connected", "live");
+      setConn("connected", "live · waiting for match");
     };
     socket.onmessage = (evt) => {
       let msg;
@@ -407,11 +428,14 @@
         return;
       }
       if (!msg || typeof msg !== "object") return;
-      if (msg.type === "match" && msg.data) renderMatch(msg.data);
-      else if (msg.type === "today" && msg.data) renderToday(msg.data);
+      if (msg.type === "match" && msg.data) {
+        renderMatch(msg.data);
+        markMatchActive();
+      } else if (msg.type === "today" && msg.data) renderToday(msg.data);
       else if (msg.type === "coach" && msg.data) renderCoach(msg.data);
     };
     socket.onclose = () => {
+      clearMatchActive();
       setConn("disconnected", "reconnecting…");
       // Cap at 30s so a dashboard left running through a long server outage
       // doesn't keep hammering once a second after the cap.
