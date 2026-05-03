@@ -11,6 +11,7 @@
   const trendSection = $("trend-section");
   const todayDetail = $("today-detail");
   const banner = $("banner");
+  const headerScoreline = $("header-scoreline");
 
   const setConn = (state, label) => {
     conn.dataset.state = state;
@@ -44,6 +45,7 @@
 
   const renderMatch = (snap) => {
     live.hidden = false;
+    headerScoreline.hidden = false;
     const ctx = snap.context || {};
     const m = snap.match || {};
     const me = snap.me || {};
@@ -72,6 +74,8 @@
     $("me-team").style.color = me.team === 0 ? "#1873ff" : me.team === 1 ? "#ff8a1f" : "";
 
     $("m-score").textContent = m.score ?? 0;
+    $("m-boost").textContent = m.boost ?? 0;
+    $("m-speed").textContent = m.speed ?? 0;
     $("m-goals").textContent = m.goals ?? 0;
     $("m-shots").textContent = m.shots ?? 0;
     $("m-acc").textContent = `(${m.shot_accuracy ?? 0}%)`;
@@ -86,6 +90,11 @@
     $("m-goal-part").textContent = `${m.goal_participation_pct ?? 0}%`;
     $("m-hardest").textContent = m.hardest_hit ?? 0;
     $("m-avg-shot-pwr").textContent = m.avg_shot_power ?? 0;
+    $("m-boost-avg").textContent = m.boost_avg ?? 0;
+    $("m-boost-wasted").textContent = `${m.boost_wasted_pct ?? 0}%`;
+    $("m-zero-boost").textContent = `${m.time_zero_boost_pct ?? 0}%`;
+    $("m-supersonic").textContent = `${m.time_supersonic_pct ?? 0}%`;
+    $("m-airborne").textContent = `${m.time_airborne_pct ?? 0}%`;
 
     const rawTouch = m.last_touch;
     const touchKey = Object.prototype.hasOwnProperty.call(ALLOWED_TOUCH, rawTouch) ? rawTouch : "none";
