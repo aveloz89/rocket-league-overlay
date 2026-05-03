@@ -4,7 +4,6 @@ import asyncio
 import json
 import logging
 import os
-import random
 import sys
 import time
 from contextlib import asynccontextmanager
@@ -12,7 +11,7 @@ from pathlib import Path
 from urllib.parse import urlparse
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, field_validator
 from typing import Optional
@@ -42,8 +41,11 @@ def _resource_path(rel: str) -> Path:
 STATIC_DIR = _resource_path("static")
 BUNDLED_INI = _resource_path("DefaultStatsAPI.ini")
 
-# UpdateState comes at PacketSendRate (default 60Hz) — throttle to 15 fps for the UI
-UPDATE_STATE_MIN_INTERVAL = 1 / 15
+# UpdateState comes at PacketSendRate (default 60Hz) — throttle to one update
+# every 5 s for the UI. The overlay is for aggregated stats; live SPEED/BOOST
+# already show in the in-game HUD, so we don't need frame-rate updates here.
+# Discrete events (BallHit, goals, shots) still broadcast immediately.
+UPDATE_STATE_MIN_INTERVAL = 5.0
 MATCH_END_EVENTS = {"MatchEnded", "PodiumStart"}
 
 
@@ -261,159 +263,100 @@ async def tcp_pump(host: str, port: int) -> None:
             log.warning("dropped event due to handler error: %s — payload=%r", exc, event)
 
 
-async def _demo_match() -> None:  # pragma: no cover — preview-only synthetic events
-    """Run one synthetic demo match. Returns when MatchEnded is fired."""
-    me_id = "Steam|76561197960409023|0"
-    me_name = "alas"
-    teammate = {"Name": "kuxir", "PrimaryId": "Steam|2|0", "TeamNum": 0, "Shortcut": 2}
-    opp = {"Name": "jstn", "PrimaryId": "Epic|3|0", "TeamNum": 1, "Shortcut": 3}
+DEMO_MATCH_SNAPSHOT = {
+    "me": {"id": "Steam|76561197960409023|0", "name": "alas", "team": 0},
+    "context": {
+        "blue": 2, "orange": 1, "clock": 187,
+        "overtime": False, "replay": False, "arena": "cs_p",
+    },
+    "match": {
+        "score": 425, "goals": 2, "shots": 5, "shot_accuracy": 40,
+        "saves": 3, "assists": 1, "touches": 18,
+        "demos_given": 1, "demos_taken": 2,
+        "boost": 62, "boost_avg": 54, "time_zero_boost_pct": 4,
+        "time_supersonic_pct": 48, "time_airborne_pct": 22,
+        "hardest_hit": 87.4, "last_touch": "self", "last_touch_name": "alas",
+        "speed": 18.2, "ball_hits": 14, "avg_shot_power": 71.2,
+        "score_per_min": 425, "goal_participation_pct": 67,
+        "possession_pct": 62, "boost_wasted_pct": 7,
+    },
+}
 
-    def _player_state(base: dict, **extra) -> dict:
-        return {
-            **base,
-            "Score": 0, "Goals": 0, "Shots": 0, "Saves": 0, "Assists": 0,
-            "Demos": 0, "Touches": 0, "CarTouches": 0,
-            "bOnGround": True, "bHasCar": True, "Speed": 0.0, "Boost": 50,
-            "Location": {"X": 0.0, "Y": -2000.0, "Z": 17.0},
-            **extra,
-        }
+DEMO_TODAY_SNAPSHOT = {
+    "matches": 12, "wins": 7, "losses": 5, "win_rate": 58,
+    "goals": 14, "shots": 38, "shot_accuracy": 37,
+    "saves": 22, "assists": 5, "demos": 4, "demos_taken": 9, "touches": 167,
+    "avg_score": 318, "best_score": 612,
+    "avg_boost": 54, "avg_supersonic_pct": 48,
+    "total_ball_hits": 167, "best_hit": 109.4, "win_streak": 3,
+}
 
-    me_state = _player_state(
-        {"Name": me_name, "PrimaryId": me_id, "TeamNum": 0, "Shortcut": 1}
-    )
-    teammate_state = _player_state(teammate, Location={"X": 1500.0, "Y": -1500.0, "Z": 17.0})
-    opp_state = _player_state(opp, Location={"X": 0.0, "Y": 2000.0, "Z": 17.0})
-    ball_loc = {"X": 0.0, "Y": 0.0, "Z": 90.0}
-
-    handle_event({"Event": "Initialized", "Data": {"MatchGuid": f"DEMO-{int(time.time())}"}})
-
-    blue_score = 0
-    orange_score = 0
-    elapsed = 0.0
-    next_event_in = 1.5
-
-    # Short demo match (real time ~20s) so the today panel populates quickly
-    while elapsed < 20:
-        # Live tick: fluctuate boost, speed, ground state and positioning
-        for s in (me_state, teammate_state, opp_state):
-            # Occasional pad pickup so big/small/stolen counters move
-            if random.random() < 0.04 and s["Boost"] <= 12:
-                s["Boost"] = 100
-            elif random.random() < 0.08:
-                s["Boost"] = min(100, s["Boost"] + 12)
-            else:
-                s["Boost"] = max(0, min(100, s["Boost"] + random.randint(-7, 4)))
-            # Speed mostly below supersonic (22) so % supersonic looks realistic
-            s["Speed"] = max(0.0, min(35.0, s["Speed"] * 0.6 + random.uniform(0, 20)))
-            s["bOnGround"] = random.random() > 0.25
-            loc = s["Location"]
-            loc["X"] = max(-3500.0, min(3500.0, loc["X"] + random.uniform(-200, 200)))
-            loc["Y"] = max(-4500.0, min(4500.0, loc["Y"] + random.uniform(-300, 300)))
-            loc["Z"] = 17.0 if s["bOnGround"] else random.uniform(150.0, 1200.0)
-
-        ball_loc["X"] = max(-3500.0, min(3500.0, ball_loc["X"] + random.uniform(-300, 300)))
-        ball_loc["Y"] = max(-4500.0, min(4500.0, ball_loc["Y"] + random.uniform(-400, 400)))
-        ball_loc["Z"] = max(90.0, min(1500.0, ball_loc["Z"] + random.uniform(-100, 200)))
-
-        update = {
-            "Event": "UpdateState",
-            "Data": {
-                "MatchGuid": agg.match_guid or "DEMO",
-                "Players": [me_state, teammate_state, opp_state],
-                "Game": {
-                    "Teams": [
-                        {"Name": "Blue", "TeamNum": 0, "Score": blue_score,
-                         "ColorPrimary": "1873FF", "ColorSecondary": "E5E5E5"},
-                        {"Name": "Orange", "TeamNum": 1, "Score": orange_score,
-                         "ColorPrimary": "C26418", "ColorSecondary": "E5E5E5"},
-                    ],
-                    "TimeSeconds": max(0, 300 - int(elapsed)),
-                    "bOvertime": False,
-                    "Ball": {
-                        "Speed": random.uniform(20, 90),
-                        "TeamNum": 1,
-                        "Location": dict(ball_loc),
-                    },
-                    "bReplay": False,
-                    "bHasWinner": False,
-                    "Winner": "",
-                    "Arena": "cs_p",
-                    "bHasTarget": True,
-                    "Target": {"Name": me_name, "Shortcut": 1, "TeamNum": 0},
-                },
-            },
-        }
-        handle_event(update)
-
-        # Discrete events sprinkled through the match
-        next_event_in -= 1 / 15
-        if next_event_in <= 0:
-            roll = random.random()
-            if roll < 0.45:
-                # Me hits ball
-                me_state["Touches"] += 1
-                handle_event({
-                    "Event": "BallHit",
-                    "Data": {
-                        "MatchGuid": agg.match_guid,
-                        "Players": [{"Name": me_name, "Shortcut": 1, "TeamNum": 0}],
-                        "Ball": {
-                            "PreHitSpeed": random.uniform(20, 60),
-                            "PostHitSpeed": random.uniform(60, 110),
-                            "Location": dict(ball_loc),
-                        },
-                    },
-                })
-            elif roll < 0.7:
-                # Me shot
-                me_state["Shots"] += 1
-                me_state["Score"] += 50
-                if random.random() < 0.4:
-                    me_state["Goals"] += 1
-                    me_state["Score"] += 100
-                    blue_score += 1
-            elif roll < 0.82:
-                # Save
-                me_state["Saves"] += 1
-                me_state["Score"] += 75
-            elif roll < 0.9:
-                # Demo by opponent (you go bHasCar=False briefly)
-                me_state["bHasCar"] = False
-            elif roll < 0.95:
-                # Opponent goal
-                orange_score += 1
-                opp_state["Goals"] += 1
-            else:
-                # Opponent ball touch
-                handle_event({
-                    "Event": "BallHit",
-                    "Data": {
-                        "MatchGuid": agg.match_guid,
-                        "Players": [{"Name": opp["Name"], "Shortcut": 3, "TeamNum": 1}],
-                        "Ball": {
-                            "PreHitSpeed": random.uniform(20, 60),
-                            "PostHitSpeed": random.uniform(40, 90),
-                            "Location": {"X": 0, "Y": 0, "Z": 100},
-                        },
-                    },
-                })
-            next_event_in = random.uniform(1.5, 3.5)
-
-        # Respawn after demo
-        if not me_state["bHasCar"] and random.random() < 0.3:
-            me_state["bHasCar"] = True
-
-        await asyncio.sleep(1 / 15)
-        elapsed += 1 / 15
-
-    handle_event({"Event": "MatchEnded", "Data": {"MatchGuid": agg.match_guid}})
+DEMO_COACH_SNAPSHOT = {
+    "last_match": {
+        "id": 12, "match_guid": "DEMO-FIXED", "player_name": "alas",
+        "started_at": "2026-05-02T20:00:00+00:00",
+        "ended_at": "2026-05-02T20:05:00+00:00",
+        "blue_score": 4, "orange_score": 2, "me_team": 0, "won": True,
+        "score": 425, "goals": 2, "shots": 5, "saves": 3, "assists": 1,
+        "demos": 1, "demos_taken": 2, "touches": 18,
+        "boost_avg": 54.0, "time_zero_boost_pct": 4.0,
+        "time_supersonic_pct": 48.0, "time_airborne_pct": 22.0,
+        "hardest_hit": 87.4, "ball_hits": 14, "avg_shot_power": 71.2,
+        "boost_wasted_pct": 7.0, "possession_pct": 62.0, "score_per_min": 425,
+        "time_def_third_pct": 38.0, "time_off_third_pct": 12.0,
+        "behind_ball_pct": 81.0, "last_back_pct": 47.0, "dist_to_ball_avg": 3120.0,
+        "big_pads": 9, "small_pads": 22, "boost_stolen": 5,
+        "aerial_touches": 4, "fast_aerials": 11,
+        "epic_saves": 1, "hat_tricks": 0, "aerial_goals": 1, "bicycle_goals": 0,
+        "long_goals": 0, "centers": 2, "pool_shots": 0, "saviors": 1, "mvps": 1,
+        "shot_accuracy": 40, "air_touch_pct": 28, "duration_min": 5,
+    },
+    "rolling_avg": {
+        "count": 20,
+        "score": 312.0, "goals": 1.4, "shots": 3.7, "saves": 2.1, "assists": 0.6,
+        "score_per_min": 392.0, "possession_pct": 58.0,
+        "boost_avg": 49.0, "boost_wasted_pct": 8.5,
+        "time_zero_boost_pct": 6.0, "time_supersonic_pct": 44.0, "time_airborne_pct": 19.0,
+        "time_def_third_pct": 42.0, "time_off_third_pct": 10.0,
+        "behind_ball_pct": 73.0, "last_back_pct": 51.0, "dist_to_ball_avg": 3290.0,
+        "big_pads": 7.2, "small_pads": 18.5, "boost_stolen": 3.4,
+        "aerial_touches": 2.5, "fast_aerials": 8.0, "ball_hits": 11.6,
+        "epic_saves": 0.3, "hat_tricks": 0.0, "aerial_goals": 0.4, "bicycle_goals": 0.0,
+        "long_goals": 0.1, "centers": 1.2, "pool_shots": 0.0, "saviors": 0.5, "mvps": 0.4,
+        "shot_accuracy": 35, "air_touch_pct": 22,
+    },
+    "trend": [
+        {"day": "2026-04-19", "matches": 6, "win_rate": 33, "shot_accuracy": 28,
+         "score_per_min": 310, "behind_ball_pct": 68, "possession_pct": 51},
+        {"day": "2026-04-22", "matches": 9, "win_rate": 44, "shot_accuracy": 31,
+         "score_per_min": 340, "behind_ball_pct": 71, "possession_pct": 54},
+        {"day": "2026-04-26", "matches": 11, "win_rate": 45, "shot_accuracy": 33,
+         "score_per_min": 365, "behind_ball_pct": 74, "possession_pct": 55},
+        {"day": "2026-04-29", "matches": 14, "win_rate": 50, "shot_accuracy": 35,
+         "score_per_min": 388, "behind_ball_pct": 76, "possession_pct": 57},
+        {"day": "2026-05-02", "matches": 12, "win_rate": 58, "shot_accuracy": 37,
+         "score_per_min": 410, "behind_ball_pct": 81, "possession_pct": 62},
+    ],
+    "insights": [
+        "Behind ball 81% (avg 73%) — your defensive read is sharper this match.",
+        "Boost wasted 7% (avg 8%) — solid pad management.",
+        "Aerial touches 4 (avg 2.5) — keep going up; your air game is improving.",
+    ],
+    "today": DEMO_TODAY_SNAPSHOT,
+    "rank_benchmark": None,
+}
 
 
-async def demo_pump() -> None:  # pragma: no cover — preview-only entry point
-    """Run demo matches in a loop. Iterative to avoid stack growth."""
-    while True:
-        await _demo_match()
-        await asyncio.sleep(2)
+def publish_demo_snapshot() -> None:  # pragma: no cover — preview-only entry point
+    """Push fixed hardcoded snapshots to the hub once at startup.
+
+    The hub caches the latest payload per type, so any client that connects
+    later will receive these. No simulation, no loop — just a static UI for
+    iterating on the frontend.
+    """
+    hub.publish({"type": "match", "data": DEMO_MATCH_SNAPSHOT})
+    hub.publish({"type": "today", "data": DEMO_TODAY_SNAPSHOT})
+    hub.publish({"type": "coach", "data": DEMO_COACH_SNAPSHOT})
 
 
 @asynccontextmanager
@@ -425,10 +368,11 @@ async def lifespan(app: FastAPI):  # pragma: no cover — exercised via uvicorn 
     db = open_db(Path(db_override)) if db_override else open_db()
     _apply_config_identity()
 
+    task: asyncio.Task | None = None
     if app.state.demo:
         agg.me_id = "Steam|76561197960409023|0"
         agg.me_name = "alas"
-        task = asyncio.create_task(demo_pump(), name="demo_pump")
+        publish_demo_snapshot()
     else:
         task = asyncio.create_task(
             tcp_pump(app.state.tcp_host, app.state.tcp_port), name="tcp_pump"
@@ -436,11 +380,12 @@ async def lifespan(app: FastAPI):  # pragma: no cover — exercised via uvicorn 
     try:
         yield
     finally:
-        task.cancel()
-        try:
-            await task
-        except asyncio.CancelledError:
-            pass
+        if task is not None:
+            task.cancel()
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
         if db is not None:
             db.close()
 
@@ -459,12 +404,16 @@ async def index() -> FileResponse:
 
 
 @app.get("/coach")
-async def coach() -> FileResponse:
-    return FileResponse(STATIC_DIR / "coach.html")
+async def coach() -> RedirectResponse:
+    # Coach was unified into the main dashboard — keep the URL as a permanent
+    # redirect so existing bookmarks / OBS sources don't break.
+    return RedirectResponse(url="/", status_code=308)
 
 
 @app.get("/api/today")
 async def api_today() -> dict:
+    if app.state.demo:
+        return dict(DEMO_TODAY_SNAPSHOT)
     if not agg.me_id or db is None:
         return dict(EMPTY_TODAY)
     # Run SQLite I/O in a thread so a slow disk doesn't block the event loop.
@@ -473,6 +422,8 @@ async def api_today() -> dict:
 
 @app.get("/api/coach")
 async def api_coach() -> dict:
+    if app.state.demo:
+        return dict(DEMO_COACH_SNAPSHOT)
     if not agg.me_id or db is None:
         return dict(EMPTY_COACH)
     target_rank = _resolve_target_rank()

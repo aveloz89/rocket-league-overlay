@@ -612,3 +612,13 @@ def test_api_coach_includes_rank_benchmark_when_configured(fresh_state, tmp_path
     result = asyncio.run(app.api_coach())
     # rank_benchmark may be None if JSON not present, but key must exist
     assert "rank_benchmark" in result
+
+
+# ── /coach legacy redirect ───────────────────────────────────────────────────
+
+
+def test_coach_route_redirects_to_root(client):
+    """The /coach URL was unified into /; existing bookmarks must keep working."""
+    resp = client.get("/coach", follow_redirects=False)
+    assert resp.status_code == 308
+    assert resp.headers["location"] == "/"
