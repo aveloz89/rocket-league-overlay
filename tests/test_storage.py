@@ -1,5 +1,10 @@
+from __future__ import annotations
+
+import json
 import sys
 from pathlib import Path
+
+import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
@@ -425,3 +430,163 @@ def test_migration_adds_highlight_columns_to_existing_db(tmp_path):
         "SELECT epic_saves, hat_tricks FROM matches WHERE match_guid='OLD_MATCH'"
     ).fetchone()
     assert row2 == (0, 0)
+
+
+# ── Rank benchmarks ──────────────────────────────────────────────────────────
+
+
+@pytest.fixture
+def benchmarks_json(tmp_path: Path) -> Path:
+    """Write a minimal but valid rank_benchmarks.json to a temp dir."""
+    from storage import BENCHMARK_KEYS, RANK_TIERS
+
+    stats: dict[str, dict[str, float]] = {
+        key: {tier: float(i + j) for j, tier in enumerate(RANK_TIERS)}
+        for i, key in enumerate(BENCHMARK_KEYS)
+    }
+    data = {
+        "version": "test-2026",
+        "tiers": list(RANK_TIERS),
+        "labels": {t: t.capitalize() for t in RANK_TIERS},
+        "stats": stats,
+    }
+    p = tmp_path / "rank_benchmarks.json"
+    p.write_text(json.dumps(data))
+    return p
+
+
+def test_load_benchmarks_returns_none_for_missing_file(tmp_path: Path) -> None:
+    from storage import _load_benchmarks
+
+    result = _load_benchmarks(tmp_path / "does_not_exist.json")
+    assert result is None
+
+
+def test_load_benchmarks_returns_none_for_invalid_json(tmp_path: Path) -> None:
+    from storage import _load_benchmarks
+
+    bad = tmp_path / "bad.json"
+    bad.write_text("{not valid json")
+    assert _load_benchmarks(bad) is None
+
+
+def test_load_benchmarks_returns_none_for_wrong_tiers(tmp_path: Path) -> None:
+    from storage import _load_benchmarks, BENCHMARK_KEYS
+
+    data = {
+        "version": "v1",
+        "tiers": ["only_one_tier"],
+        "labels": {"only_one_tier": "Only"},
+        "stats": {k: {"only_one_tier": 1.0} for k in BENCHMARK_KEYS},
+    }
+    p = tmp_path / "wrong.json"
+    p.write_text(json.dumps(data))
+    assert _load_benchmarks(p) is None
+
+
+def test_load_benchmarks_returns_none_when_stat_missing_tier(tmp_path: Path) -> None:
+    """A stat that is missing one tier entry should fail validation."""
+    from storage import _load_benchmarks, RANK_TIERS, BENCHMARK_KEYS
+
+    stats: dict[str, dict[str, float]] = {
+        key: {tier: 1.0 for tier in RANK_TIERS}
+        for key in BENCHMARK_KEYS
+    }
+    # Remove one tier from the first stat key to trigger validation failure
+    first_key = BENCHMARK_KEYS[0]
+    del stats[first_key]["bronze"]
+
+    data = {
+        "version": "v1",
+        "tiers": list(RANK_TIERS),
+        "labels": {t: t for t in RANK_TIERS},
+        "stats": stats,
+    }
+    p = tmp_path / "incomplete.json"
+    p.write_text(json.dumps(data))
+    assert _load_benchmarks(p) is None
+
+
+def test_load_benchmarks_returns_model_for_valid_file(benchmarks_json: Path) -> None:
+    from storage import _load_benchmarks, RankBenchmarks
+
+    result = _load_benchmarks(benchmarks_json)
+    assert result is not None
+    assert isinstance(result, RankBenchmarks)
+    assert result.version == "test-2026"
+
+
+def test_load_benchmarks_validates_real_json() -> None:
+    """The production JSON must parse and validate without errors."""
+    from storage import _load_benchmarks, RankBenchmarks, BENCHMARK_KEYS, RANK_TIERS
+
+    project_root = Path(__file__).resolve().parents[1]
+    json_path = project_root / "static" / "rank_benchmarks.json"
+    result = _load_benchmarks(json_path)
+    assert result is not None, "static/rank_benchmarks.json is missing or invalid"
+    assert isinstance(result, RankBenchmarks)
+    # All 15 benchmark keys must be present
+    for key in BENCHMARK_KEYS:
+        assert key in result.stats, f"missing stat key: {key}"
+    # All 8 tiers must be present in each stat
+    for key in BENCHMARK_KEYS:
+        for tier in RANK_TIERS:
+            assert tier in result.stats[key], f"missing tier {tier!r} in stat {key!r}"
+
+
+def test_benchmark_for_tier_returns_stats_dict(benchmarks_json: Path) -> None:
+    from storage import _load_benchmarks, _benchmark_for_tier, BENCHMARK_KEYS
+
+    bm = _load_benchmarks(benchmarks_json)
+    assert bm is not None
+    result = _benchmark_for_tier(bm, "diamond")
+    assert result is not None
+    assert set(result.keys()) == set(BENCHMARK_KEYS)
+
+
+def test_benchmark_for_tier_returns_none_for_invalid_tier(benchmarks_json: Path) -> None:
+    from storage import _load_benchmarks, _benchmark_for_tier
+
+    bm = _load_benchmarks(benchmarks_json)
+    assert bm is not None
+    assert _benchmark_for_tier(bm, "mythical") is None
+
+
+def test_coach_stats_without_target_rank_has_null_benchmark(tmp_path: Path) -> None:
+    db = open_db(tmp_path / "stats.db")
+    result = coach_stats(db, "Steam|1|0")
+    assert "rank_benchmark" in result
+    assert result["rank_benchmark"] is None
+
+
+def test_coach_stats_with_target_rank_returns_benchmark(tmp_path: Path, monkeypatch) -> None:
+    import storage
+    from storage import _load_benchmarks
+
+    project_root = Path(__file__).resolve().parents[1]
+    json_path = project_root / "static" / "rank_benchmarks.json"
+
+    db = open_db(tmp_path / "stats.db")
+    bm = _load_benchmarks(json_path)
+    # Patch _load_benchmarks to return cached benchmarks without hitting the real path
+    monkeypatch.setattr(storage, "_BENCHMARKS_PATH", json_path)
+
+    result = coach_stats(db, "Steam|1|0", target_rank="diamond")
+    rb = result["rank_benchmark"]
+    assert rb is not None
+    assert rb["tier"] == "diamond"
+    assert rb["label"] == "Diamond"
+    assert isinstance(rb["stats"], dict)
+    assert "shot_accuracy" in rb["stats"]
+
+
+def test_coach_stats_with_invalid_target_rank_returns_null(tmp_path: Path, monkeypatch) -> None:
+    import storage
+
+    project_root = Path(__file__).resolve().parents[1]
+    json_path = project_root / "static" / "rank_benchmarks.json"
+    monkeypatch.setattr(storage, "_BENCHMARKS_PATH", json_path)
+
+    db = open_db(tmp_path / "stats.db")
+    result = coach_stats(db, "Steam|1|0", target_rank="nonexistent")
+    assert result["rank_benchmark"] is None

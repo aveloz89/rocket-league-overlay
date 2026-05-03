@@ -1,0 +1,167 @@
+{
+  "_comment": "Numbers are MVP estimates based on general Rocket League knowledge. Refine from Reddit r/RocketLeague threads, the RL wiki, or aggregated Ballchasing public replays per playlist. Version tag: mvp-estimates-2026-05.",
+  "version": "mvp-estimates-2026-05",
+  "tiers": ["bronze", "silver", "gold", "platinum", "diamond", "champion", "grand_champion", "supersonic_legend"],
+  "labels": {
+    "bronze": "Bronze",
+    "silver": "Silver",
+    "gold": "Gold",
+    "platinum": "Platinum",
+    "diamond": "Diamond",
+    "champion": "Champion",
+    "grand_champion": "Grand Champion",
+    "supersonic_legend": "Supersonic Legend"
+  },
+  "stats": {
+    "shot_accuracy": {
+      "bronze": 18,
+      "silver": 21,
+      "gold": 24,
+      "platinum": 27,
+      "diamond": 30,
+      "champion": 33,
+      "grand_champion": 36,
+      "supersonic_legend": 38
+    },
+    "score_per_min": {
+      "bronze": 120,
+      "silver": 145,
+      "gold": 170,
+      "platinum": 200,
+      "diamond": 230,
+      "champion": 260,
+      "grand_champion": 290,
+      "supersonic_legend": 310
+    },
+    "possession_pct": {
+      "bronze": 47,
+      "silver": 47.5,
+      "gold": 48,
+      "platinum": 49,
+      "diamond": 50,
+      "champion": 51,
+      "grand_champion": 51.5,
+      "supersonic_legend": 52
+    },
+    "boost_avg": {
+      "bronze": 28,
+      "silver": 31,
+      "gold": 34,
+      "platinum": 37,
+      "diamond": 40,
+      "champion": 44,
+      "grand_champion": 47,
+      "supersonic_legend": 50
+    },
+    "boost_wasted_pct": {
+      "bronze": 30,
+      "silver": 27,
+      "gold": 24,
+      "platinum": 21,
+      "diamond": 18,
+      "champion": 15,
+      "grand_champion": 12,
+      "supersonic_legend": 10
+    },
+    "time_zero_boost_pct": {
+      "bronze": 22,
+      "silver": 20,
+      "gold": 18,
+      "platinum": 16,
+      "diamond": 14,
+      "champion": 12,
+      "grand_champion": 10,
+      "supersonic_legend": 8
+    },
+    "time_supersonic_pct": {
+      "bronze": 12,
+      "silver": 14,
+      "gold": 16,
+      "platinum": 19,
+      "diamond": 22,
+      "champion": 25,
+      "grand_champion": 29,
+      "supersonic_legend": 32
+    },
+    "time_airborne_pct": {
+      "bronze": 6,
+      "silver": 8,
+      "gold": 10,
+      "platinum": 12,
+      "diamond": 14,
+      "champion": 16,
+      "grand_champion": 19,
+      "supersonic_legend": 22
+    },
+    "time_def_third_pct": {
+      "bronze": 38,
+      "silver": 37,
+      "gold": 36,
+      "platinum": 35,
+      "diamond": 34,
+      "champion": 33,
+      "grand_champion": 31,
+      "supersonic_legend": 30
+    },
+    "time_off_third_pct": {
+      "bronze": 22,
+      "silver": 23,
+      "gold": 24,
+      "platinum": 25,
+      "diamond": 26,
+      "champion": 27,
+      "grand_champion": 28,
+      "supersonic_legend": 30
+    },
+    "behind_ball_pct": {
+      "bronze": 52,
+      "silver": 55,
+      "gold": 58,
+      "platinum": 61,
+      "diamond": 64,
+      "champion": 67,
+      "grand_champion": 70,
+      "supersonic_legend": 72
+    },
+    "last_back_pct": {
+      "bronze": 38,
+      "silver": 37,
+      "gold": 36,
+      "platinum": 35,
+      "diamond": 34,
+      "champion": 33,
+      "grand_champion": 32,
+      "supersonic_legend": 32
+    },
+    "aerial_touches": {
+      "bronze": 1,
+      "silver": 1.5,
+      "gold": 2,
+      "platinum": 2.5,
+      "diamond": 3,
+      "champion": 4,
+      "grand_champion": 5,
+      "supersonic_legend": 6
+    },
+    "fast_aerials": {
+      "bronze": 0,
+      "silver": 0.2,
+      "gold": 0.5,
+      "platinum": 1,
+      "diamond": 1.5,
+      "champion": 2,
+      "grand_champion": 2.5,
+      "supersonic_legend": 3
+    },
+    "air_touch_pct": {
+      "bronze": 3,
+      "silver": 5,
+      "gold": 7,
+      "platinum": 10,
+      "diamond": 13,
+      "champion": 16,
+      "grand_champion": 19,
+      "supersonic_legend": 22
+    }
+  }
+}

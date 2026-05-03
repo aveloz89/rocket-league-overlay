@@ -1,15 +1,115 @@
-"""SQLite storage for per-match snapshots + JSON config for player identity."""
+"""SQLite storage for per-match snapshots + JSON config for player identity.
+
+Rank benchmark data lives in static/rank_benchmarks.json and is validated
+against RankBenchmarks on first load. The loaded model is cached via
+_load_benchmarks (functools.cache) so disk I/O happens only once per process.
+"""
 
 from __future__ import annotations
 
 import json
+import logging
 import sqlite3
 from datetime import datetime
+from functools import cache
 from pathlib import Path
+from typing import Any
+
+from pydantic import BaseModel, field_validator
+
+log = logging.getLogger("rl-overlay.storage")
 
 CONFIG_DIR = Path.home() / ".rl-overlay"
 DB_PATH = CONFIG_DIR / "stats.db"
 CONFIG_PATH = CONFIG_DIR / "config.json"
+
+# Path to the static JSON; resolved relative to this file so PyInstaller's
+# _MEIPASS resolution in app.py is not needed here — storage is always loaded
+# from the same directory as app.py.
+_BENCHMARKS_PATH: Path = Path(__file__).parent / "static" / "rank_benchmarks.json"
+
+RANK_TIERS: tuple[str, ...] = (
+    "bronze",
+    "silver",
+    "gold",
+    "platinum",
+    "diamond",
+    "champion",
+    "grand_champion",
+    "supersonic_legend",
+)
+
+BENCHMARK_KEYS: tuple[str, ...] = (
+    "shot_accuracy",
+    "score_per_min",
+    "possession_pct",
+    "boost_avg",
+    "boost_wasted_pct",
+    "time_zero_boost_pct",
+    "time_supersonic_pct",
+    "time_airborne_pct",
+    "time_def_third_pct",
+    "time_off_third_pct",
+    "behind_ball_pct",
+    "last_back_pct",
+    "aerial_touches",
+    "fast_aerials",
+    "air_touch_pct",
+)
+
+
+class RankBenchmarks(BaseModel):
+    version: str
+    tiers: list[str]
+    labels: dict[str, str]
+    stats: dict[str, dict[str, float]]  # stat_key -> {tier: value}
+
+    @field_validator("tiers")
+    @classmethod
+    def _tiers_match(cls, v: list[str]) -> list[str]:
+        if tuple(v) != RANK_TIERS:
+            raise ValueError("tiers must match RANK_TIERS exactly and in order")
+        return v
+
+    @field_validator("stats")
+    @classmethod
+    def _stats_complete(cls, v: dict[str, dict[str, float]]) -> dict[str, dict[str, float]]:
+        for stat, by_tier in v.items():
+            missing = set(RANK_TIERS) - set(by_tier.keys())
+            if missing:
+                raise ValueError(f"{stat} missing tiers: {missing}")
+        return v
+
+
+@cache
+def _load_benchmarks(path: Path) -> RankBenchmarks | None:
+    """Read, parse, and validate rank_benchmarks.json.
+
+    Cached so the file is read only once per process. Returns None if the file
+    is missing or invalid — the feature degrades silently, the app keeps running.
+    """
+    try:
+        raw: Any = json.loads(path.read_text())
+        return RankBenchmarks.model_validate(raw)
+    except FileNotFoundError:
+        log.warning("rank_benchmarks.json not found at %s — benchmark feature disabled", path)
+        return None
+    except Exception as exc:  # noqa: BLE001 — validation errors, JSON errors, IO errors
+        log.warning("rank_benchmarks.json failed to load: %s — benchmark feature disabled", exc)
+        return None
+
+
+def _benchmark_for_tier(
+    benchmarks: RankBenchmarks, tier: str
+) -> dict[str, float] | None:
+    """Extract per-tier values for all benchmark keys.
+
+    Returns None when tier is not in the data (e.g. stale config with a
+    tier name that no longer exists in the JSON).
+    """
+    if tier not in RANK_TIERS:
+        return None
+    return {key: benchmarks.stats[key][tier] for key in BENCHMARK_KEYS if key in benchmarks.stats}
 
 # Rolling-average window used by /coach. Tuned so a single off-day won't
 # dominate the average and so insights are stable across short sessions.
@@ -471,7 +571,27 @@ def _generate_insights(last: dict, avg: dict) -> list[str]:
     return [phrase for _, phrase in candidates[:3]]
 
 
-def coach_stats(conn: sqlite3.Connection, player_id: str) -> dict:
+def _build_rank_benchmark(target_rank: str | None) -> dict | None:
+    """Return the rank_benchmark payload for the given tier, or None."""
+    if not target_rank:
+        return None
+    benchmarks = _load_benchmarks(_BENCHMARKS_PATH)
+    if benchmarks is None:
+        return None
+    stats = _benchmark_for_tier(benchmarks, target_rank)
+    if stats is None:
+        log.warning("target_rank %r not found in benchmarks — treating as None", target_rank)
+        return None
+    return {
+        "tier": target_rank,
+        "label": benchmarks.labels.get(target_rank, target_rank),
+        "stats": stats,
+    }
+
+
+def coach_stats(
+    conn: sqlite3.Connection, player_id: str, target_rank: Optional[str] = None
+) -> dict:
     last = _last_match(conn, player_id)
     exclude_id = last["id"] if last else None
     avg = _rolling_avg(conn, player_id, exclude_id)
@@ -488,6 +608,7 @@ def coach_stats(conn: sqlite3.Connection, player_id: str) -> dict:
         "trend": trend,
         "insights": insights,
         "today": today_stats(conn, player_id),
+        "rank_benchmark": _build_rank_benchmark(target_rank),
     }
 
 

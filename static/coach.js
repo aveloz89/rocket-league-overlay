@@ -71,7 +71,28 @@
     return `${rounded}${suffix ?? ""}`;
   };
 
-  const buildRow = (def, last, avg) => {
+  const trendFromDiff = (diff, tolerance, direction) => {
+    if (Math.abs(diff) <= tolerance || direction === "neutral") return "flat";
+    if ((direction === "high_good" && diff > 0) || (direction === "low_good" && diff < 0)) return "up";
+    return "down";
+  };
+
+  const buildCompareSpan = (def, v, a, className, prefix) => {
+    const span = document.createElement("span");
+    span.className = className;
+    if (a === null || a === undefined || v === null || v === undefined) {
+      span.textContent = "";
+      span.dataset.trend = "flat";
+      return span;
+    }
+    const diff = Number(v) - Number(a);
+    span.textContent = `${prefix} ${fmt(a, def.suffix)}`;
+    const tolerance = def.suffix === "%" ? 3 : Math.max(1, Math.abs(Number(a)) * 0.05);
+    span.dataset.trend = trendFromDiff(diff, tolerance, def.direction);
+    return span;
+  };
+
+  const buildRow = (def, last, avg, benchmark) => {
     const li = document.createElement("li");
     li.className = "row";
 
@@ -84,35 +105,20 @@
     const v = last?.[def.key];
     value.textContent = v === null || v === undefined ? "—" : fmt(v, def.suffix);
 
-    const compare = document.createElement("span");
-    compare.className = "compare";
-    const a = avg?.[def.key];
-    if (a === null || a === undefined || v === null || v === undefined) {
-      compare.textContent = "";
-      compare.dataset.trend = "flat";
-    } else {
-      const diff = Number(v) - Number(a);
-      compare.textContent = `avg ${fmt(a, def.suffix)}`;
-      const tolerance = def.suffix === "%" ? 3 : Math.max(1, Math.abs(Number(a)) * 0.05);
-      if (Math.abs(diff) <= tolerance || def.direction === "neutral") {
-        compare.dataset.trend = "flat";
-      } else if ((def.direction === "high_good" && diff > 0)
-                 || (def.direction === "low_good" && diff < 0)) {
-        compare.dataset.trend = "up";
-      } else {
-        compare.dataset.trend = "down";
-      }
-    }
+    const compare = buildCompareSpan(def, v, avg?.[def.key], "compare", "avg");
 
-    li.append(label, value, compare);
+    const bVal = benchmark?.[def.key] ?? null;
+    const benchmarkSpan = buildCompareSpan(def, v, bVal, "benchmark", "rk");
+
+    li.append(label, value, compare, benchmarkSpan);
     return li;
   };
 
-  const renderRows = (containerId, defs, last, avg) => {
+  const renderRows = (containerId, defs, last, avg, benchmark) => {
     const container = $(containerId);
     container.replaceChildren();
     for (const def of defs) {
-      container.appendChild(buildRow(def, last, avg));
+      container.appendChild(buildRow(def, last, avg, benchmark));
     }
   };
 
@@ -281,11 +287,15 @@
     $("last-score").textContent = last.score ?? 0;
     $("last-duration").textContent = last.duration_min ?? 0;
 
+    const benchmark = data.rank_benchmark?.stats ?? {};
+    const rankSelect = $("rank-select");
+    rankSelect.value = data.rank_benchmark?.tier ?? "";
+
     renderInsights(data.insights);
-    renderRows("cat-pos", POSITIONING_ROWS, last, avg);
-    renderRows("cat-boost", BOOST_ROWS, last, avg);
-    renderRows("cat-mech", MECH_ROWS, last, avg);
-    renderRows("cat-highlights", HIGHLIGHT_ROWS, last, avg);
+    renderRows("cat-pos", POSITIONING_ROWS, last, avg, benchmark);
+    renderRows("cat-boost", BOOST_ROWS, last, avg, benchmark);
+    renderRows("cat-mech", MECH_ROWS, last, avg, benchmark);
+    renderRows("cat-highlights", HIGHLIGHT_ROWS, last, avg, benchmark);
     renderTrend(data.trend);
     renderToday(data.today);
   };
@@ -330,6 +340,35 @@
     socket.onerror = () => socket.close();
   };
 
+  const initRankSelect = () => {
+    const select = $("rank-select");
+    select.addEventListener("change", async () => {
+      const previous = select.dataset.committed ?? "";
+      const chosen = select.value;
+      const body = chosen === "" ? { rank: null } : { rank: chosen };
+      try {
+        const r = await fetch("/api/config/rank", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+        });
+        if (r.ok) {
+          select.dataset.committed = chosen;
+          // WS broadcast will push the updated payload — render() syncs select.value.
+        } else {
+          select.value = previous;
+          select.dataset.state = "error";
+          setTimeout(() => { select.dataset.state = ""; }, 1000);
+        }
+      } catch {
+        select.value = previous;
+      }
+    });
+    // Track the committed value so we can revert on error.
+    select.dataset.committed = select.value;
+  };
+
   fetchCoach();
   connect();
+  initRankSelect();
 })();
