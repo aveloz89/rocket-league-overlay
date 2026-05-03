@@ -14,9 +14,12 @@ from urllib.parse import urlparse
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
+from pydantic import BaseModel, field_validator
+from typing import Optional
 
 from state import MatchAggregator
 from storage import (
+    RANK_TIERS,
     coach_stats,
     load_config,
     open_db,
@@ -145,7 +148,28 @@ EMPTY_COACH = {
     "trend": [],
     "insights": [],
     "today": dict(EMPTY_TODAY),
+    "rank_benchmark": None,
 }
+
+
+class SetRankRequest(BaseModel):
+    rank: Optional[str]
+
+    @field_validator("rank")
+    @classmethod
+    def _valid_tier(cls, v: Optional[str]) -> Optional[str]:
+        if v is not None and v not in RANK_TIERS:
+            raise ValueError(f"rank must be one of {RANK_TIERS} or null")
+        return v
+
+
+def _resolve_target_rank() -> Optional[str]:
+    """Read target_rank from config; return None if missing or invalid tier."""
+    cfg = load_config()
+    rank = cfg.get("target_rank")
+    if rank not in RANK_TIERS:
+        return None
+    return rank
 
 
 def _broadcast_match() -> None:
@@ -164,7 +188,8 @@ def _broadcast_coach() -> None:
     if not agg.me_id or db is None:
         hub.publish({"type": "coach", "data": dict(EMPTY_COACH)})
         return
-    hub.publish({"type": "coach", "data": coach_stats(db, agg.me_id)})
+    target_rank = _resolve_target_rank()
+    hub.publish({"type": "coach", "data": coach_stats(db, agg.me_id, target_rank)})
 
 
 def _persist_current_match() -> bool:
@@ -450,7 +475,20 @@ async def api_today() -> dict:
 async def api_coach() -> dict:
     if not agg.me_id or db is None:
         return dict(EMPTY_COACH)
-    return await asyncio.to_thread(coach_stats, db, agg.me_id)
+    target_rank = _resolve_target_rank()
+    return await asyncio.to_thread(coach_stats, db, agg.me_id, target_rank)
+
+
+@app.post("/api/config/rank")
+async def set_rank(req: SetRankRequest) -> dict:
+    cfg = load_config()
+    if req.rank is None:
+        cfg.pop("target_rank", None)
+    else:
+        cfg["target_rank"] = req.rank
+    save_config(cfg)
+    _broadcast_coach()
+    return {"rank": req.rank}
 
 
 @app.websocket("/ws")

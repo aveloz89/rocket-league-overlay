@@ -532,3 +532,83 @@ def test_integration_statfeed_persisted_in_coach_stats(fresh_state):
     last = result["last_match"]
     assert last["epic_saves"] == 2
     assert last["hat_tricks"] == 1
+
+
+# ── POST /api/config/rank ────────────────────────────────────────────────────
+
+
+@pytest.fixture
+def client(tmp_path, monkeypatch):
+    """TestClient with a clean DB and isolated config path."""
+    import storage
+    from fastapi.testclient import TestClient
+    from state import MatchAggregator
+
+    monkeypatch.setattr(storage, "CONFIG_DIR", tmp_path)
+    monkeypatch.setattr(storage, "CONFIG_PATH", tmp_path / "config.json")
+    monkeypatch.setattr(app, "agg", MatchAggregator())
+    monkeypatch.setattr(app, "hub", app.Hub())
+    test_db = open_db(tmp_path / "stats.db")
+    monkeypatch.setattr(app, "db", test_db)
+    with TestClient(app.app) as c:
+        yield c
+    test_db.close()
+
+
+def test_set_rank_valid_returns_200(client, tmp_path, monkeypatch):
+    import storage
+    monkeypatch.setattr(storage, "CONFIG_DIR", tmp_path)
+    monkeypatch.setattr(storage, "CONFIG_PATH", tmp_path / "config.json")
+
+    resp = client.post("/api/config/rank", json={"rank": "diamond"})
+    assert resp.status_code == 200
+    assert resp.json() == {"rank": "diamond"}
+
+
+def test_set_rank_persists_to_config(client, tmp_path, monkeypatch):
+    import storage
+    monkeypatch.setattr(storage, "CONFIG_DIR", tmp_path)
+    monkeypatch.setattr(storage, "CONFIG_PATH", tmp_path / "config.json")
+
+    client.post("/api/config/rank", json={"rank": "champion"})
+    cfg = storage.load_config()
+    assert cfg.get("target_rank") == "champion"
+
+
+def test_set_rank_null_clears_target(client, tmp_path, monkeypatch):
+    import storage
+    monkeypatch.setattr(storage, "CONFIG_DIR", tmp_path)
+    monkeypatch.setattr(storage, "CONFIG_PATH", tmp_path / "config.json")
+
+    client.post("/api/config/rank", json={"rank": "diamond"})
+    resp = client.post("/api/config/rank", json={"rank": None})
+    assert resp.status_code == 200
+    assert resp.json() == {"rank": None}
+    cfg = storage.load_config()
+    assert cfg.get("target_rank") is None
+
+
+def test_set_rank_invalid_tier_returns_422(client):
+    resp = client.post("/api/config/rank", json={"rank": "mythical_legend"})
+    assert resp.status_code == 422
+
+
+def test_set_rank_missing_body_returns_422(client):
+    resp = client.post("/api/config/rank", json={})
+    # Pydantic v2 requires the field — missing body key raises 422
+    # rank field has no default so it's required
+    assert resp.status_code == 422
+
+
+def test_api_coach_includes_rank_benchmark_when_configured(fresh_state, tmp_path, monkeypatch):
+    """When target_rank is in config, /api/coach should include rank_benchmark."""
+    import storage
+    monkeypatch.setattr(storage, "CONFIG_DIR", tmp_path)
+    monkeypatch.setattr(storage, "CONFIG_PATH", tmp_path / "config.json")
+
+    storage.save_config({"target_rank": "diamond"})
+    app.agg.me_id, app.agg.me_name = "Steam|1|0", "alas"
+
+    result = asyncio.run(app.api_coach())
+    # rank_benchmark may be None if JSON not present, but key must exist
+    assert "rank_benchmark" in result
