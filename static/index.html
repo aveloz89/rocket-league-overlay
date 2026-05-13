@@ -65,43 +65,40 @@
             <span class="dot"></span>
             <span class="live-pill"><span class="pill-k">boost</span><span class="pill-v" id="m-boost">0</span><span class="pill-suffix">%</span></span>
             <span class="live-pill"><span class="pill-k">speed</span><span class="pill-v" id="m-speed">0</span></span>
+            <span class="live-pill score"><span class="pill-k">score</span><span class="pill-v" id="m-score">0</span></span>
           </div>
         </header>
 
-        <div class="big-stats">
-          <div class="big-stat score">
-            <span class="label">SCORE</span>
-            <span class="val" id="m-score">0</span>
-          </div>
-        </div>
+        <details class="match-details" open>
+          <summary>Match details</summary>
 
-        <section class="rosters" id="rosters" hidden aria-label="Lobby roster">
-          <ul class="roster blue" id="roster-blue"></ul>
-          <ul class="roster orange" id="roster-orange"></ul>
-        </section>
+          <section class="rosters" id="rosters" hidden aria-label="Lobby roster">
+            <ul class="roster blue" id="roster-blue"></ul>
+            <ul class="roster orange" id="roster-orange"></ul>
+          </section>
 
-        <section class="team-totals" id="team-totals" hidden aria-label="Team totals">
-          <article class="team-totals-card blue">
-            <span class="team-label">BLUE</span>
-            <ul class="grid">
-              <li><span class="k">Goals</span><span class="v" id="tt-blue-goals">0</span></li>
-              <li><span class="k">Saves</span><span class="v" id="tt-blue-saves">0</span></li>
-              <li><span class="k">Assists</span><span class="v" id="tt-blue-assists">0</span></li>
-              <li><span class="k">Demos</span><span class="v" id="tt-blue-demos">0</span></li>
-            </ul>
-          </article>
-          <article class="team-totals-card orange">
-            <span class="team-label">ORANGE</span>
-            <ul class="grid">
-              <li><span class="k">Goals</span><span class="v" id="tt-orange-goals">0</span></li>
-              <li><span class="k">Saves</span><span class="v" id="tt-orange-saves">0</span></li>
-              <li><span class="k">Assists</span><span class="v" id="tt-orange-assists">0</span></li>
-              <li><span class="k">Demos</span><span class="v" id="tt-orange-demos">0</span></li>
-            </ul>
-          </article>
-        </section>
+          <section class="team-totals" id="team-totals" hidden aria-label="Team totals">
+            <article class="team-totals-card blue">
+              <span class="team-label">BLUE</span>
+              <ul class="grid">
+                <li><span class="k">Goals</span><span class="v" id="tt-blue-goals">0</span></li>
+                <li><span class="k">Saves</span><span class="v" id="tt-blue-saves">0</span></li>
+                <li><span class="k">Assists</span><span class="v" id="tt-blue-assists">0</span></li>
+                <li><span class="k">Demos</span><span class="v" id="tt-blue-demos">0</span></li>
+              </ul>
+            </article>
+            <article class="team-totals-card orange">
+              <span class="team-label">ORANGE</span>
+              <ul class="grid">
+                <li><span class="k">Goals</span><span class="v" id="tt-orange-goals">0</span></li>
+                <li><span class="k">Saves</span><span class="v" id="tt-orange-saves">0</span></li>
+                <li><span class="k">Assists</span><span class="v" id="tt-orange-assists">0</span></li>
+                <li><span class="k">Demos</span><span class="v" id="tt-orange-demos">0</span></li>
+              </ul>
+            </article>
+          </section>
 
-        <div class="live-grids">
+          <div class="live-grids">
           <div class="section">
             <h3>OUTPUT</h3>
             <ul class="grid">
@@ -150,7 +147,8 @@
               <li><span class="k">Demos taken</span><span class="v" id="m-demos-taken">0</span></li>
             </ul>
           </div>
-        </div>
+          </div>
+        </details>
       </section>
 
       <section class="hero" id="hero" hidden aria-labelledby="last-heading">
