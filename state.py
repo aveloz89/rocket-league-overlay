@@ -172,6 +172,11 @@ class MatchAggregator:
     _detect_window_frames: int = field(default=0, repr=False)
     _detect_target_counts: dict[str, int] = field(default_factory=dict, repr=False)
 
+    # Lobby roster — slim copy of the most recent Players[] for the overlay,
+    # and a per-PrimaryId latest snapshot for end-of-match persistence.
+    _latest_players: list[dict] = field(default_factory=list, repr=False)
+    players_seen: dict[str, dict] = field(default_factory=dict, repr=False)
+
     def reset_match(self, match_guid: str) -> None:
         keep = (self.me_id, self.me_name)
         self.__init__()  # type: ignore[misc]
@@ -219,6 +224,12 @@ class MatchAggregator:
                 self.ball_speed = float(speed)
             team_num = ball.get("TeamNum")
             self.ball_team = team_num if team_num in (0, 1) else None
+
+        self._latest_players = players
+        for p in players:
+            pid = p.get("PrimaryId")
+            if pid:
+                self.players_seen[pid] = p
 
         # Init match guid if first frame is UpdateState (no Initialized seen).
         # NOTE: caller is responsible for persisting the prior match snapshot
@@ -568,10 +579,13 @@ class MatchAggregator:
         return self.frames_pos > 0
 
     def won(self) -> bool | None:
-        if self.me_team < 0:
+        return self._won_for_team(self.me_team)
+
+    def _won_for_team(self, team: int) -> bool | None:
+        if team not in (0, 1):
             return None
-        my_score = self.blue_score if self.me_team == 0 else self.orange_score
-        opp_score = self.orange_score if self.me_team == 0 else self.blue_score
+        my_score = self.blue_score if team == 0 else self.orange_score
+        opp_score = self.orange_score if team == 0 else self.blue_score
         if my_score == opp_score:
             return None
         return my_score > opp_score
@@ -579,6 +593,17 @@ class MatchAggregator:
     def to_overlay_dict(self) -> dict:
         return {
             "me": {"id": self.me_id, "name": self.me_name, "team": self.me_team},
+            "players": [
+                {
+                    "id": p.get("PrimaryId"),
+                    "name": p.get("Name"),
+                    "team": p.get("TeamNum"),
+                    "boost": p.get("Boost", 0),
+                    "is_me": p.get("PrimaryId") == self.me_id,
+                }
+                for p in self._latest_players
+                if p.get("PrimaryId") and p.get("Name")
+            ],
             "context": {
                 "blue": self.blue_score,
                 "orange": self.orange_score,
@@ -615,6 +640,46 @@ class MatchAggregator:
                 "possession_pct": self.possession_pct(),
                 "boost_wasted_pct": self.boost_wasted_pct(),
             },
+        }
+
+    def to_db_snapshots(self) -> list[dict]:
+        """Return one row per player observed during the match.
+
+        The user ("me") row carries all derived metrics (boost_avg, positioning,
+        mechanics) since those require frame-level state we only track for the
+        identified user. The other rows carry only end-of-match player stats
+        from the latest Players[] payload — derived fields are 0/None.
+        """
+        snapshots: list[dict] = []
+        me_snap = self.to_db_snapshot()
+        if me_snap.get("player_id"):
+            snapshots.append(me_snap)
+        for pid, payload in self.players_seen.items():
+            if pid == self.me_id:
+                continue
+            snapshots.append(self._build_player_snapshot(payload))
+        return snapshots
+
+    def _build_player_snapshot(self, p: dict) -> dict:
+        team = p.get("TeamNum", -1)
+        return {
+            "match_guid": self.match_guid,
+            "player_id": p.get("PrimaryId"),
+            "player_name": p.get("Name"),
+            "started_at": self.started_at.isoformat() if self.started_at else None,
+            "ended_at": datetime.now(timezone.utc).isoformat(),
+            "blue_score": self.blue_score,
+            "orange_score": self.orange_score,
+            "me_team": team,
+            "team_size": self.team_size,
+            "won": self._won_for_team(team),
+            "score": p.get("Score", 0),
+            "goals": p.get("Goals", 0),
+            "shots": p.get("Shots", 0),
+            "saves": p.get("Saves", 0),
+            "assists": p.get("Assists", 0),
+            "demos": p.get("Demos", 0),
+            "touches": p.get("Touches", 0),
         }
 
     def to_db_snapshot(self) -> dict:
