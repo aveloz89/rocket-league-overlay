@@ -1199,3 +1199,31 @@ def test_team_totals_zero_when_no_players():
         "blue":   {"goals": 0, "saves": 0, "assists": 0, "demos": 0},
         "orange": {"goals": 0, "saves": 0, "assists": 0, "demos": 0},
     }
+
+
+# ── last_goal banner state ──────────────────────────────────────────────────
+
+
+def test_last_goal_updates_when_goal_scored():
+    agg = MatchAggregator()
+    agg.on_initialized({"MatchGuid": "M1"})
+
+    assert agg.to_overlay_dict()["last_goal"] is None
+
+    agg.on_goal_scored({"Scorer": {"Name": "alas", "TeamNum": 0}, "GoalSpeed": 88.0})
+    lg = agg.to_overlay_dict()["last_goal"]
+    assert lg["type"] == "goal"
+    assert lg["actor_name"] == "alas"
+    assert lg["actor_team"] == 0
+    assert lg["payload"]["speed"] == 88.0
+    assert "occurred_at" in lg
+
+
+def test_last_goal_resets_on_new_match():
+    agg = MatchAggregator()
+    agg.on_initialized({"MatchGuid": "M1"})
+    agg.on_goal_scored({"Scorer": {"Name": "alas", "TeamNum": 0}})
+    assert agg.last_goal is not None
+
+    agg.on_initialized({"MatchGuid": "M2"})
+    assert agg.last_goal is None

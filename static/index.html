@@ -53,6 +53,10 @@
         <header class="live-head">
           <h2 id="live-heading">Live match</h2>
           <div class="banner" id="banner" hidden></div>
+          <div class="goal-banner" id="goal-banner" hidden role="status" aria-live="polite">
+            <span class="goal-banner-label">GOAL</span>
+            <span class="goal-banner-text" id="goal-banner-text">—</span>
+          </div>
           <div class="me-line">
             <span id="me-name">—</span>
             <span class="dot"></span>
@@ -163,6 +167,11 @@
         <p class="insights-empty" id="insights-empty" hidden>
           Keep playing to surface patterns — I need at least 5 prior matches for suggestions.
         </p>
+      </section>
+
+      <section class="events" id="events-section" hidden aria-labelledby="events-heading">
+        <h2 id="events-heading">Last match timeline</h2>
+        <ul class="events-list" id="events-list"></ul>
       </section>
 
       <section class="cats" id="cats" hidden aria-label="Stat categories">

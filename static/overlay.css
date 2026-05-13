@@ -281,6 +281,41 @@ button:focus-visible {
 .banner.replay { background: #c084fc; color: var(--fg-inverse); }
 .banner.overtime { background: var(--bad); color: #fff; }
 
+.goal-banner {
+  align-self: center;
+  background: var(--accent);
+  color: var(--fg-inverse);
+  padding: var(--space-2) var(--space-4);
+  border-radius: var(--radius-sm);
+  display: inline-flex;
+  align-items: baseline;
+  gap: var(--space-3);
+  font-weight: 800;
+  letter-spacing: 0.04em;
+}
+
+.goal-banner[data-team="blue"] { background: var(--blue); color: #fff; }
+.goal-banner[data-team="orange"] { background: var(--orange); color: var(--fg-inverse); }
+
+.goal-banner-label {
+  font-size: 0.6875rem;
+  letter-spacing: 0.3em;
+  opacity: 0.85;
+}
+
+.goal-banner-text {
+  font-size: 0.9375rem;
+}
+
+.goal-banner.show {
+  animation: goal-pulse 0.35s ease-out;
+}
+
+@keyframes goal-pulse {
+  from { transform: scale(0.85); opacity: 0; }
+  to   { transform: scale(1); opacity: 1; }
+}
+
 .me-line {
   display: flex;
   flex-wrap: wrap;
@@ -696,6 +731,72 @@ button:focus-visible {
 .row .benchmark[data-trend="down"] { color: var(--bad); }
 .row .compare[data-trend="flat"],
 .row .benchmark[data-trend="flat"] { color: var(--muted); }
+
+/* ── Events timeline ────────────────────────────────────────────────── */
+
+.events {
+  background: var(--bg-soft);
+  border-radius: var(--radius);
+  padding: var(--space-3) var(--space-4);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.events h2 {
+  margin: 0;
+  font-size: 0.75rem;
+  letter-spacing: 0.25em;
+  color: var(--muted);
+  font-weight: 700;
+}
+
+.events-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.event-row {
+  display: grid;
+  grid-template-columns: 3rem 5.5rem 1fr;
+  align-items: baseline;
+  gap: var(--space-3);
+  padding: var(--space-1) 0;
+  border-bottom: 1px dashed var(--border);
+  font-size: 0.8125rem;
+}
+
+.event-row:last-child {
+  border-bottom: 0;
+}
+
+.event-time {
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+  font-size: 0.75rem;
+}
+
+.event-label {
+  font-weight: 700;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-size: 0.6875rem;
+}
+
+.event-row[data-type="goal"] .event-label { color: var(--accent); }
+.event-row[data-type="goal"][data-team="blue"]   .event-label { color: var(--blue); }
+.event-row[data-type="goal"][data-team="orange"] .event-label { color: var(--orange); }
+.event-row[data-type="match_paused"] .event-label,
+.event-row[data-type="match_unpaused"] .event-label { color: var(--warn); }
+
+.event-detail {
+  color: var(--fg);
+  font-weight: 600;
+}
 
 /* ── Trend with sparklines ──────────────────────────────────────────── */
 
