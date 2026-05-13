@@ -35,6 +35,19 @@ LAST_TOUCH_SELF = "self"
 LAST_TOUCH_TEAM = "team"
 LAST_TOUCH_OPPONENT = "opp"
 
+# Keys Psyonix has used over time to expose the currently spectated player on
+# the Game object. Probed in priority order; the first one whose nested dict
+# has a Name wins. `bHasTarget` is intentionally not gating — some builds
+# populate the player payload without setting that flag.
+_TARGET_KEYS: tuple[str, ...] = (
+    "Target",
+    "TargetPlayer",
+    "FocusedPlayer",
+    "Player",
+    "SpectatedPlayer",
+    "PrimaryPlayer",
+)
+
 # Allowlist of StatfeedEvent names → MatchAggregator attribute.
 # Keys are lowercase for case-insensitive lookup.
 _STATFEED_EVENTS: dict[str, str] = {
@@ -58,6 +71,18 @@ def _norm_y(y: float, team: int) -> float:
     Blue (team=0) defends the -Y side, Orange (team=1) defends the +Y side.
     """
     return float(y) if team == 0 else -float(y)
+
+
+def _target_name(game: dict) -> str | None:
+    """Return the spectated/focused player Name, probing the keys Psyonix has
+    used across RL builds. Returns None when no candidate exposes a Name."""
+    for key in _TARGET_KEYS:
+        candidate = game.get(key)
+        if isinstance(candidate, dict):
+            name = candidate.get("Name")
+            if name:
+                return name
+    return None
 
 
 @dataclass
@@ -140,6 +165,8 @@ class MatchAggregator:
     arena: str = ""
     clock: int = 0
     team_size: int | None = None
+    ball_speed: float = 0.0
+    ball_team: int | None = None
 
     # Identity-detection state — track Target during the first frames after Initialized
     _detect_window_frames: int = field(default=0, repr=False)
@@ -184,6 +211,14 @@ class MatchAggregator:
         team_size = game.get("TeamSize")
         if isinstance(team_size, int) and team_size > 0:
             self.team_size = team_size
+
+        ball = game.get("Ball")
+        if isinstance(ball, dict):
+            speed = ball.get("Speed")
+            if isinstance(speed, (int, float)):
+                self.ball_speed = float(speed)
+            team_num = ball.get("TeamNum")
+            self.ball_team = team_num if team_num in (0, 1) else None
 
         # Init match guid if first frame is UpdateState (no Initialized seen).
         # NOTE: caller is responsible for persisting the prior match snapshot
@@ -430,10 +465,7 @@ class MatchAggregator:
         if self.me_id or self._detect_window_frames <= 0:
             return None
         self._detect_window_frames -= 1
-        if not game.get("bHasTarget"):
-            return None
-        target = game.get("Target") or {}
-        target_name = target.get("Name")
+        target_name = _target_name(game)
         if not target_name:
             return None
         self._detect_target_counts[target_name] = (
@@ -554,6 +586,8 @@ class MatchAggregator:
                 "overtime": self.in_overtime,
                 "replay": self.in_replay,
                 "arena": self.arena,
+                "ball_speed": round(self.ball_speed, 1),
+                "ball_team": self.ball_team,
             },
             "match": {
                 "score": self.score,
