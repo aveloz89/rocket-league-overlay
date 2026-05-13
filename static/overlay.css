@@ -81,8 +81,8 @@ button:focus-visible {
 /* ── Header ─────────────────────────────────────────────────────────── */
 
 .page-header {
-  display: grid;
-  grid-template-columns: auto 1fr auto auto;
+  display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: var(--space-4);
   padding: var(--space-3) var(--space-5);
@@ -99,6 +99,10 @@ button:focus-visible {
   justify-content: center;
   gap: var(--space-3);
   font-weight: 700;
+  /* Centers inside the flex header when present; the row collapses to zero
+   * width when [hidden] so the controls on the right don't drift away from
+   * the heading. */
+  margin-inline: auto;
 }
 .header-scoreline .team {
   font-size: 0.625rem;
@@ -187,7 +191,7 @@ button:focus-visible {
 }
 
 .mode-tabs {
-  grid-column: 1 / -1;
+  flex-basis: 100%;
   display: flex;
   flex-wrap: wrap;
   gap: var(--space-1);
@@ -307,13 +311,15 @@ button:focus-visible {
   font-size: 0.9375rem;
 }
 
-.goal-banner.show {
-  animation: goal-pulse 0.35s ease-out;
-}
+@media (prefers-reduced-motion: no-preference) {
+  .goal-banner.show {
+    animation: goal-pulse 0.35s ease-out;
+  }
 
-@keyframes goal-pulse {
-  from { transform: scale(0.85); opacity: 0; }
-  to   { transform: scale(1); opacity: 1; }
+  @keyframes goal-pulse {
+    from { transform: scale(0.85); opacity: 0; }
+    to   { transform: scale(1); opacity: 1; }
+  }
 }
 
 .me-line {
@@ -327,6 +333,8 @@ button:focus-visible {
   letter-spacing: 0.04em;
 }
 .me-line #me-name { color: var(--fg); font-weight: 600; }
+.me-line #me-team[data-team="blue"] { color: var(--blue); }
+.me-line #me-team[data-team="orange"] { color: var(--orange); }
 .me-line .dot::before { content: "•"; color: var(--muted); }
 
 .live-pill {
