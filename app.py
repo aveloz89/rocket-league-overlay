@@ -22,6 +22,7 @@ from storage import (
     coach_stats,
     load_config,
     open_db,
+    save_ball_touches,
     save_config,
     save_match,
     save_match_events,
@@ -211,14 +212,16 @@ def _persist_current_match() -> bool:
     for snap in snapshots:
         if save_match(db, snap):
             inserted += 1
-    # Drain the event buffer in the same transaction window so a duplicate
-    # call (MatchEnded + a later guid rotation) doesn't double-insert.
+    # Drain the event + touch buffers in the same transaction window so a
+    # duplicate call (MatchEnded + a later guid rotation) doesn't double-insert.
     events_inserted = save_match_events(db, agg.match_guid, agg.events)
     agg.events.clear()
-    if inserted > 0 or events_inserted > 0:
+    touches_inserted = save_ball_touches(db, agg.match_guid, agg.touch_events)
+    agg.touch_events.clear()
+    if inserted > 0 or events_inserted > 0 or touches_inserted > 0:
         log.info(
-            "saved match %s (%d player rows, %d events)",
-            agg.match_guid, inserted, events_inserted,
+            "saved match %s (%d player rows, %d events, %d touches)",
+            agg.match_guid, inserted, events_inserted, touches_inserted,
         )
         return True
     return False

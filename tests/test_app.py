@@ -235,6 +235,36 @@ def test_event_buffer_does_not_double_insert(fresh_state):
     assert count == 1
 
 
+def test_ball_hits_persist_to_ball_touches_on_end(fresh_state):
+    """BallHit during the match → ball_touches rows on MatchEnded, drained
+    so a second persist doesn't duplicate."""
+    app.agg.me_id, app.agg.me_name = "Steam|1|0", "alas"
+    app.handle_event({"Event": "MatchInitialized", "Data": {"MatchGuid": "M_TOUCHES"}})
+
+    for speed in (45.0, 78.5, 92.0):
+        app.handle_event({
+            "Event": "BallHit",
+            "Data": {
+                "Ball": {"PostHitSpeed": speed},
+                "Players": [{"PrimaryId": "Steam|1|0", "Name": "alas", "TeamNum": 0}],
+            },
+        })
+    app.handle_event({"Event": "MatchEnded", "Data": {"MatchGuid": "M_TOUCHES"}})
+
+    rows = app.db.execute(
+        "SELECT post_hit_speed FROM ball_touches "
+        "WHERE match_guid='M_TOUCHES' ORDER BY id"
+    ).fetchall()
+    assert [r[0] for r in rows] == [45.0, 78.5, 92.0]
+
+    # Idempotency — second flush must not duplicate
+    app._persist_current_match()
+    count = app.db.execute(
+        "SELECT COUNT(*) FROM ball_touches WHERE match_guid='M_TOUCHES'"
+    ).fetchone()[0]
+    assert count == 3
+
+
 def test_match_destroyed_persists_match(fresh_state):
     """If RL emits MatchDestroyed instead of MatchEnded (user quits mid-match
     or the session is torn down), the in-progress match must still be saved."""
