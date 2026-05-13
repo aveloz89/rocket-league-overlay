@@ -71,8 +71,11 @@
 
     $("me-name").textContent = me.name ?? "detecting…";
     const teamLabel = me.team === 0 ? "blue team" : me.team === 1 ? "orange team" : "—";
-    $("me-team").textContent = teamLabel;
-    $("me-team").style.color = me.team === 0 ? "#1873ff" : me.team === 1 ? "#ff8a1f" : "";
+    const meTeamEl = $("me-team");
+    meTeamEl.textContent = teamLabel;
+    if (me.team === 0) meTeamEl.dataset.team = "blue";
+    else if (me.team === 1) meTeamEl.dataset.team = "orange";
+    else delete meTeamEl.dataset.team;
 
     $("m-score").textContent = m.score ?? 0;
     $("m-boost").textContent = m.boost ?? 0;
