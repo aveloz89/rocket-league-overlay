@@ -173,6 +173,7 @@ CREATE TABLE IF NOT EXISTS matches (
     pool_shots INTEGER DEFAULT 0,
     saviors INTEGER DEFAULT 0,
     mvps INTEGER DEFAULT 0,
+    team_size INTEGER,
     UNIQUE(match_guid, player_id)
 );
 """
@@ -202,6 +203,7 @@ _NEW_COLUMNS: list[tuple[str, str]] = [
     ("pool_shots", "INTEGER DEFAULT 0"),
     ("saviors", "INTEGER DEFAULT 0"),
     ("mvps", "INTEGER DEFAULT 0"),
+    ("team_size", "INTEGER"),
 ]
 
 
@@ -247,11 +249,11 @@ def save_match(conn: sqlite3.Connection, snapshot: dict) -> bool:
             last_back_pct, dist_to_ball_avg, big_pads, small_pads, boost_stolen,
             aerial_touches, fast_aerials,
             epic_saves, hat_tricks, aerial_goals, bicycle_goals, long_goals,
-            centers, pool_shots, saviors, mvps
+            centers, pool_shots, saviors, mvps, team_size
         ) VALUES (
             ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
             ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-            ?, ?, ?, ?, ?, ?, ?, ?, ?
+            ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
         )
         """,
         (
@@ -301,13 +303,16 @@ def save_match(conn: sqlite3.Connection, snapshot: dict) -> bool:
             snapshot.get("pool_shots", 0),
             snapshot.get("saviors", 0),
             snapshot.get("mvps", 0),
+            snapshot.get("team_size"),
         ),
     )
     conn.commit()
     return cur.rowcount > 0
 
 
-def today_stats(conn: sqlite3.Connection, player_id: str) -> dict:
+def today_stats(
+    conn: sqlite3.Connection, player_id: str, mode: int | None = None
+) -> dict:
     cur = conn.execute(
         """
         SELECT
@@ -330,8 +335,9 @@ def today_stats(conn: sqlite3.Connection, player_id: str) -> dict:
         FROM matches
         WHERE player_id = ?
         AND date(started_at, 'localtime') = date('now', 'localtime')
+        AND (? IS NULL OR team_size = ?)
         """,
-        (player_id,),
+        (player_id, mode, mode),
     )
     row = cur.fetchone()
     columns = [c[0] for c in cur.description]
@@ -358,11 +364,13 @@ def today_stats(conn: sqlite3.Connection, player_id: str) -> dict:
         "avg_supersonic_pct": round(raw["avg_supersonic"]),
         "total_ball_hits": raw["total_ball_hits"],
         "best_hit": round(raw["best_hit"], 1),
-        "win_streak": _current_win_streak(conn, player_id),
+        "win_streak": _current_win_streak(conn, player_id, mode),
     }
 
 
-def _current_win_streak(conn: sqlite3.Connection, player_id: str) -> int:
+def _current_win_streak(
+    conn: sqlite3.Connection, player_id: str, mode: int | None = None
+) -> int:
     """Consecutive wins from the most recent match, today only.
     Both losses and draws (won = NULL) break the streak."""
     cur = conn.execute(
@@ -370,9 +378,10 @@ def _current_win_streak(conn: sqlite3.Connection, player_id: str) -> int:
         SELECT won FROM matches
         WHERE player_id = ?
           AND date(started_at, 'localtime') = date('now', 'localtime')
+          AND (? IS NULL OR team_size = ?)
         ORDER BY ended_at DESC
         """,
-        (player_id,),
+        (player_id, mode, mode),
     )
     streak = 0
     for (won,) in cur.fetchall():
@@ -429,10 +438,18 @@ def _duration_minutes(started_at: str | None, ended_at: str | None) -> int:
     return max(0, round(delta))
 
 
-def _last_match(conn: sqlite3.Connection, player_id: str) -> dict | None:
+def _last_match(
+    conn: sqlite3.Connection, player_id: str, mode: int | None = None
+) -> dict | None:
     cur = conn.execute(
-        "SELECT * FROM matches WHERE player_id = ? ORDER BY ended_at DESC LIMIT 1",
-        (player_id,),
+        """
+        SELECT * FROM matches
+        WHERE player_id = ?
+          AND (? IS NULL OR team_size = ?)
+        ORDER BY ended_at DESC
+        LIMIT 1
+        """,
+        (player_id, mode, mode),
     )
     row = cur.fetchone()
     if row is None:
@@ -445,6 +462,7 @@ def _rolling_avg(
     conn: sqlite3.Connection,
     player_id: str,
     exclude_id: int | None,
+    mode: int | None = None,
     window: int = COACH_ROLLING_WINDOW,
 ) -> dict:
     cur = conn.execute(
@@ -487,11 +505,12 @@ def _rolling_avg(
             SELECT * FROM matches
             WHERE player_id = ?
               AND (? IS NULL OR id != ?)
+              AND (? IS NULL OR team_size = ?)
             ORDER BY ended_at DESC
             LIMIT ?
         )
         """,
-        (player_id, exclude_id, exclude_id, window),
+        (player_id, exclude_id, exclude_id, mode, mode, window),
     )
     row = cur.fetchone()
     columns = [c[0] for c in cur.description]
@@ -508,7 +527,10 @@ def _rolling_avg(
 
 
 def _trend_by_day(
-    conn: sqlite3.Connection, player_id: str, days: int = COACH_TREND_DAYS
+    conn: sqlite3.Connection,
+    player_id: str,
+    mode: int | None = None,
+    days: int = COACH_TREND_DAYS,
 ) -> list[dict]:
     cur = conn.execute(
         """
@@ -524,10 +546,11 @@ def _trend_by_day(
         FROM matches
         WHERE player_id = ?
           AND date(started_at, 'localtime') >= date('now', 'localtime', ?)
+          AND (? IS NULL OR team_size = ?)
         GROUP BY day
         ORDER BY day ASC
         """,
-        (player_id, f"-{days - 1} days"),
+        (player_id, f"-{days - 1} days", mode, mode),
     )
     out: list[dict] = []
     for row in cur.fetchall():
@@ -590,12 +613,15 @@ def _build_rank_benchmark(target_rank: str | None) -> dict | None:
 
 
 def coach_stats(
-    conn: sqlite3.Connection, player_id: str, target_rank: Optional[str] = None
+    conn: sqlite3.Connection,
+    player_id: str,
+    target_rank: str | None = None,
+    mode: int | None = None,
 ) -> dict:
-    last = _last_match(conn, player_id)
+    last = _last_match(conn, player_id, mode)
     exclude_id = last["id"] if last else None
-    avg = _rolling_avg(conn, player_id, exclude_id)
-    trend = _trend_by_day(conn, player_id)
+    avg = _rolling_avg(conn, player_id, exclude_id, mode)
+    trend = _trend_by_day(conn, player_id, mode)
     rolling_count = avg.get("count") or 0
     insights = (
         _generate_insights(last, avg)
@@ -607,7 +633,7 @@ def coach_stats(
         "rolling_avg": avg,
         "trend": trend,
         "insights": insights,
-        "today": today_stats(conn, player_id),
+        "today": today_stats(conn, player_id, mode),
         "rank_benchmark": _build_rank_benchmark(target_rank),
     }
 

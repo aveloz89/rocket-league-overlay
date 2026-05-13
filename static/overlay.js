@@ -403,19 +403,66 @@
     renderTrend(data.trend);
   };
 
+  // ── Mode filter (1v1 / 2v2 / 3v3 / All) ──────────────────────────
+
+  const VALID_MODES = new Set(["1", "2", "3"]);
+  let currentMode = "";
+
+  const readModeFromUrl = () => {
+    const m = new URL(location.href).searchParams.get("mode");
+    return VALID_MODES.has(m) ? m : "";
+  };
+
+  const writeModeToUrl = (mode) => {
+    const url = new URL(location.href);
+    if (mode) url.searchParams.set("mode", mode);
+    else url.searchParams.delete("mode");
+    history.replaceState(null, "", url);
+  };
+
+  const syncModeButtons = () => {
+    for (const btn of document.querySelectorAll(".mode-tab")) {
+      btn.setAttribute("aria-pressed", btn.dataset.mode === currentMode ? "true" : "false");
+    }
+  };
+
+  const buildModeQuery = () => (currentMode ? `?mode=${currentMode}` : "");
+
   // ── Initial fetches (covers refresh with no live game) ───────────
 
-  const fetchInitial = async () => {
+  const fetchCoachAndToday = async () => {
     try {
+      const q = buildModeQuery();
       const [coachRes, todayRes] = await Promise.all([
-        fetch("/api/coach"),
-        fetch("/api/today"),
+        fetch(`/api/coach${q}`),
+        fetch(`/api/today${q}`),
       ]);
       if (coachRes.ok) renderCoach(await coachRes.json());
       if (todayRes.ok) renderToday(await todayRes.json());
     } catch {
       // Network failure on first load — the WS will refill once connected.
     }
+  };
+
+  const fetchInitial = fetchCoachAndToday;
+
+  const setMode = (mode) => {
+    const normalized = VALID_MODES.has(mode) ? mode : "";
+    if (normalized === currentMode) return;
+    currentMode = normalized;
+    writeModeToUrl(currentMode);
+    syncModeButtons();
+    fetchCoachAndToday();
+  };
+
+  const initModeTabs = () => {
+    currentMode = readModeFromUrl();
+    syncModeButtons();
+    document.getElementById("mode-tabs").addEventListener("click", (e) => {
+      const btn = e.target.closest(".mode-tab");
+      if (!btn) return;
+      setMode(btn.dataset.mode ?? "");
+    });
   };
 
   // ── WebSocket ────────────────────────────────────────────────────
@@ -440,8 +487,14 @@
       if (msg.type === "match" && msg.data) {
         renderMatch(msg.data);
         markMatchActive();
-      } else if (msg.type === "today" && msg.data) renderToday(msg.data);
-      else if (msg.type === "coach" && msg.data) renderCoach(msg.data);
+      } else if (msg.type === "today" && msg.data) {
+        // When a mode filter is active, the coach broadcast triggers a fresh
+        // filtered fetch that also refreshes today — skip the unfiltered push.
+        if (!currentMode) renderToday(msg.data);
+      } else if (msg.type === "coach" && msg.data) {
+        if (currentMode) fetchCoachAndToday();
+        else renderCoach(msg.data);
+      }
     };
     socket.onclose = () => {
       clearMatchActive();
@@ -483,6 +536,7 @@
     select.dataset.committed = select.value;
   };
 
+  initModeTabs();
   fetchInitial();
   connect();
   initRankSelect();
