@@ -175,6 +175,52 @@ def test_match_guid_change_persists_prior_match(fresh_state):
     assert ("MATCH_A", 100) in rows
 
 
+def test_goal_scored_persists_to_match_events_on_end(fresh_state):
+    """A GoalScored event during the match should land in match_events on MatchEnded."""
+    app.agg.me_id, app.agg.me_name = "Steam|1|0", "alas"
+    app.handle_event({"Event": "MatchInitialized", "Data": {"MatchGuid": "M_GOALS"}})
+    app.handle_event({
+        "Event": "GoalScored",
+        "Data": {
+            "Scorer": {"Name": "alas", "PrimaryId": "Steam|1|0", "TeamNum": 0},
+            "GoalSpeed": 92.4,
+            "GoalTime": 14.7,
+        },
+    })
+    app.handle_event({"Event": "CountdownBegin", "Data": {}})
+    app.handle_event({"Event": "RoundStarted", "Data": {}})
+    app.handle_event({"Event": "MatchEnded", "Data": {"MatchGuid": "M_GOALS"}})
+
+    rows = app.db.execute(
+        "SELECT type, actor_name, payload FROM match_events "
+        "WHERE match_guid='M_GOALS' ORDER BY id"
+    ).fetchall()
+    assert len(rows) == 3
+    goal_row = next(r for r in rows if r[0] == "goal")
+    assert goal_row[1] == "alas"
+    assert json.loads(goal_row[2]) == {"speed": 92.4, "time": 14.7}
+    assert {r[0] for r in rows} == {"goal", "countdown_begin", "round_started"}
+
+
+def test_event_buffer_does_not_double_insert(fresh_state):
+    """Calling _persist_current_match twice (MatchEnded then a stale guid
+    rotation) must NOT duplicate event rows — the buffer drains on first flush."""
+    app.agg.me_id, app.agg.me_name = "Steam|1|0", "alas"
+    app.handle_event({"Event": "MatchInitialized", "Data": {"MatchGuid": "M_TWICE"}})
+    app.handle_event({
+        "Event": "GoalScored",
+        "Data": {"Scorer": {"Name": "alas", "TeamNum": 0}},
+    })
+
+    app._persist_current_match()
+    app._persist_current_match()  # second flush — buffer is already empty
+
+    count = app.db.execute(
+        "SELECT COUNT(*) FROM match_events WHERE match_guid='M_TWICE'"
+    ).fetchone()[0]
+    assert count == 1
+
+
 def test_match_destroyed_persists_match(fresh_state):
     """If RL emits MatchDestroyed instead of MatchEnded (user quits mid-match
     or the session is torn down), the in-progress match must still be saved."""

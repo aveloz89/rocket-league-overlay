@@ -125,6 +125,19 @@ INSIGHT_REL_THRESHOLD = 0.25
 INSIGHT_ABS_THRESHOLD = 8
 
 _SCHEMA = """
+CREATE TABLE IF NOT EXISTS match_events (
+    id INTEGER PRIMARY KEY,
+    match_guid TEXT NOT NULL,
+    type TEXT NOT NULL,
+    actor_id TEXT,
+    actor_name TEXT,
+    actor_team INTEGER,
+    occurred_at TEXT NOT NULL,
+    payload TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_match_events_guid ON match_events(match_guid);
+CREATE INDEX IF NOT EXISTS idx_match_events_type ON match_events(type);
+
 CREATE TABLE IF NOT EXISTS matches (
     id INTEGER PRIMARY KEY,
     match_guid TEXT NOT NULL,
@@ -226,6 +239,39 @@ def open_db(path: Path = DB_PATH) -> sqlite3.Connection:
     conn.executescript(_SCHEMA)
     _migrate(conn)
     return conn
+
+
+def save_match_events(
+    conn: sqlite3.Connection, match_guid: str | None, events: list[dict]
+) -> int:
+    """Insert every buffered match event. Returns the number of rows written.
+
+    Caller is responsible for clearing the buffer afterwards — replays of the
+    same event list would duplicate rows because we don't enforce a UNIQUE
+    constraint (two goals from the same scorer at the same second is legal).
+    """
+    if not match_guid or not events:
+        return 0
+    rows = [
+        (
+            match_guid,
+            evt["type"],
+            evt.get("actor_id"),
+            evt.get("actor_name"),
+            evt.get("actor_team"),
+            evt["occurred_at"],
+            json.dumps(evt.get("payload") or {}),
+        )
+        for evt in events
+    ]
+    conn.executemany(
+        "INSERT INTO match_events "
+        "(match_guid, type, actor_id, actor_name, actor_team, occurred_at, payload) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?)",
+        rows,
+    )
+    conn.commit()
+    return len(rows)
 
 
 def save_match(conn: sqlite3.Connection, snapshot: dict) -> bool:

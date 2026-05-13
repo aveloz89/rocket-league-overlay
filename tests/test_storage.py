@@ -8,7 +8,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from storage import coach_stats, open_db, save_match, today_stats  # noqa: E402
+from storage import coach_stats, open_db, save_match, save_match_events, today_stats  # noqa: E402
 
 
 def make_snapshot(match_guid="M1", won=True, **overrides):
@@ -720,6 +720,48 @@ def test_coach_stats_trend_filters_by_mode(tmp_path):
     days = [d["day"] for d in res_2["trend"]]
     assert today.strftime("%Y-%m-%d") in days
     assert yesterday.strftime("%Y-%m-%d") not in days
+
+
+# ── match_events ────────────────────────────────────────────────────────────
+
+
+def test_open_db_creates_match_events_table(tmp_path):
+    db = open_db(tmp_path / "stats.db")
+    cols = {row[1] for row in db.execute("PRAGMA table_info(match_events)")}
+    assert {"id", "match_guid", "type", "actor_id", "actor_name",
+            "actor_team", "occurred_at", "payload"} <= cols
+
+
+def test_save_match_events_persists_rows(tmp_path):
+    db = open_db(tmp_path / "stats.db")
+    events = [
+        {
+            "type": "goal", "actor_id": "Steam|1|0", "actor_name": "alas",
+            "actor_team": 0, "occurred_at": "2026-05-13T20:00:01+00:00",
+            "payload": {"speed": 84.5, "time": 22.0},
+        },
+        {
+            "type": "countdown_begin", "actor_id": None, "actor_name": None,
+            "actor_team": None, "occurred_at": "2026-05-13T19:59:55+00:00",
+            "payload": {},
+        },
+    ]
+
+    inserted = save_match_events(db, "M1", events)
+    assert inserted == 2
+
+    rows = db.execute(
+        "SELECT type, actor_name, payload FROM match_events "
+        "WHERE match_guid='M1' ORDER BY occurred_at"
+    ).fetchall()
+    assert rows[0][0] == "countdown_begin"
+    assert rows[1] == ("goal", "alas", json.dumps({"speed": 84.5, "time": 22.0}))
+
+
+def test_save_match_events_noop_for_empty_inputs(tmp_path):
+    db = open_db(tmp_path / "stats.db")
+    assert save_match_events(db, "M1", []) == 0
+    assert save_match_events(db, None, [{"type": "goal", "occurred_at": "x"}]) == 0
 
 
 def test_migration_adds_team_size_column_to_existing_db(tmp_path):
