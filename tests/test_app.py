@@ -223,6 +223,56 @@ def test_match_ended_persists_match(fresh_state):
     assert row == (250, 1)
 
 
+def test_match_ended_persists_a_row_per_player(fresh_state):
+    """A 3v3 match should produce 6 rows on MatchEnded — one per player."""
+    app.agg.me_id, app.agg.me_name = "Steam|1|0", "alas"
+    app.handle_event({"Event": "MatchInitialized", "Data": {"MatchGuid": "M_LOBBY"}})
+
+    players = [
+        {"Name": "alas",  "PrimaryId": "Steam|1|0", "TeamNum": 0, "Boost": 50,
+         "Score": 300, "Goals": 1, "Shots": 2, "Saves": 1, "Assists": 0, "Demos": 0,
+         "Touches": 5, "Speed": 0, "bOnGround": True, "bHasCar": True},
+        {"Name": "tide",  "PrimaryId": "Steam|2|0", "TeamNum": 0, "Boost": 30,
+         "Score": 200, "Goals": 0, "Shots": 1, "Saves": 2, "Assists": 1, "Demos": 0,
+         "Touches": 3, "Speed": 0, "bOnGround": True, "bHasCar": True},
+        {"Name": "kio",   "PrimaryId": "Steam|3|0", "TeamNum": 0, "Boost": 80,
+         "Score": 150, "Goals": 0, "Shots": 1, "Saves": 0, "Assists": 2, "Demos": 1,
+         "Touches": 2, "Speed": 0, "bOnGround": True, "bHasCar": True},
+        {"Name": "jstn",  "PrimaryId": "Epic|4|0",  "TeamNum": 1, "Boost": 22,
+         "Score": 250, "Goals": 1, "Shots": 3, "Saves": 1, "Assists": 0, "Demos": 0,
+         "Touches": 4, "Speed": 0, "bOnGround": True, "bHasCar": True},
+        {"Name": "zen",   "PrimaryId": "Epic|5|0",  "TeamNum": 1, "Boost": 54,
+         "Score": 180, "Goals": 0, "Shots": 1, "Saves": 1, "Assists": 1, "Demos": 0,
+         "Touches": 3, "Speed": 0, "bOnGround": True, "bHasCar": True},
+        {"Name": "flux",  "PrimaryId": "Epic|6|0",  "TeamNum": 1, "Boost": 11,
+         "Score": 110, "Goals": 0, "Shots": 0, "Saves": 0, "Assists": 0, "Demos": 1,
+         "Touches": 2, "Speed": 0, "bOnGround": True, "bHasCar": True},
+    ]
+    app.handle_event({
+        "Event": "UpdateState",
+        "Data": {
+            "MatchGuid": "M_LOBBY",
+            "Players": players,
+            "Game": {"Teams": [{"TeamNum": 0, "Score": 3}, {"TeamNum": 1, "Score": 1}],
+                     "TimeSeconds": 0, "bOvertime": False, "bReplay": False,
+                     "Arena": "stadium", "bHasTarget": False, "TeamSize": 3},
+        },
+    })
+    app.handle_event({"Event": "MatchEnded", "Data": {"MatchGuid": "M_LOBBY"}})
+
+    rows = app.db.execute(
+        "SELECT player_id, player_name, me_team, won, goals, team_size "
+        "FROM matches WHERE match_guid='M_LOBBY' ORDER BY player_id"
+    ).fetchall()
+    assert len(rows) == 6
+    # me row keeps its enriched semantics (won=1 because blue=3 > orange=1)
+    me = next(r for r in rows if r[0] == "Steam|1|0")
+    assert me[2] == 0 and me[3] == 1 and me[4] == 1 and me[5] == 3
+    # opponent row stores that player's team and a per-team won verdict
+    opp = next(r for r in rows if r[0] == "Epic|4|0")
+    assert opp[1] == "jstn" and opp[2] == 1 and opp[3] == 0 and opp[4] == 1
+
+
 def test_unknown_event_is_ignored(fresh_state):
     """Forward-compat: events the aggregator doesn't recognize must not raise."""
     app.handle_event({"Event": "ReplayStart", "Data": {}})

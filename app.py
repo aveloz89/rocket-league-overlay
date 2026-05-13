@@ -199,12 +199,19 @@ def _broadcast_coach() -> None:
 
 
 def _persist_current_match() -> bool:
-    """Persist the current match if we have enough info. Returns True on insert."""
+    """Persist a row for every player observed in the match.
+
+    Returns True if at least one row was newly inserted.
+    """
     if db is None:
         return False
-    snap = agg.to_db_snapshot()
-    if save_match(db, snap):
-        log.info("saved match %s (won=%s)", snap["match_guid"], snap["won"])
+    snapshots = agg.to_db_snapshots()
+    inserted = 0
+    for snap in snapshots:
+        if save_match(db, snap):
+            inserted += 1
+    if inserted > 0:
+        log.info("saved match %s (%d player rows)", agg.match_guid, inserted)
         return True
     return False
 
@@ -269,6 +276,14 @@ async def tcp_pump(host: str, port: int) -> None:
 
 DEMO_MATCH_SNAPSHOT = {
     "me": {"id": "Steam|76561197960409023|0", "name": "alas", "team": 0},
+    "players": [
+        {"id": "Steam|76561197960409023|0", "name": "alas", "team": 0, "boost": 62, "is_me": True},
+        {"id": "Steam|2|0", "name": "tide", "team": 0, "boost": 38, "is_me": False},
+        {"id": "Steam|3|0", "name": "kio", "team": 0, "boost": 81, "is_me": False},
+        {"id": "Epic|4|0", "name": "jstn", "team": 1, "boost": 22, "is_me": False},
+        {"id": "Epic|5|0", "name": "zen", "team": 1, "boost": 54, "is_me": False},
+        {"id": "Epic|6|0", "name": "flux", "team": 1, "boost": 11, "is_me": False},
+    ],
     "context": {
         "blue": 2, "orange": 1, "clock": 187,
         "overtime": False, "replay": False, "arena": "cs_p",

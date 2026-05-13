@@ -106,6 +106,52 @@
       const who = m.last_touch_name ? ` (${m.last_touch_name})` : "";
       lastEl.textContent = `${ALLOWED_TOUCH[touchKey]}${who}`;
     }
+
+    renderRosters(snap.players);
+  };
+
+  // ── Compact rosters ──────────────────────────────────────────────
+
+  const buildRosterRow = (p) => {
+    const li = document.createElement("li");
+    li.className = "roster-row" + (p.is_me ? " me" : "");
+
+    const name = document.createElement("span");
+    name.className = "roster-name";
+    name.textContent = p.name ?? "—";
+
+    const boost = document.createElement("span");
+    boost.className = "roster-boost";
+    boost.textContent = p.boost ?? 0;
+
+    const bar = document.createElement("span");
+    bar.className = "roster-bar";
+    bar.setAttribute("aria-hidden", "true");
+    const fill = document.createElement("span");
+    fill.className = "roster-bar-fill";
+    const clamped = Math.max(0, Math.min(100, Number(p.boost) || 0));
+    fill.style.width = `${clamped}%`;
+    bar.appendChild(fill);
+
+    li.append(name, boost, bar);
+    return li;
+  };
+
+  const renderRosters = (players) => {
+    const rosters = $("rosters");
+    if (!players || players.length === 0) {
+      rosters.hidden = true;
+      return;
+    }
+    rosters.hidden = false;
+    const blue = $("roster-blue");
+    const orange = $("roster-orange");
+    blue.replaceChildren();
+    orange.replaceChildren();
+    for (const p of players) {
+      const row = buildRosterRow(p);
+      (p.team === 0 ? blue : orange).appendChild(row);
+    }
   };
 
   // ── Today (detailed) render ──────────────────────────────────────

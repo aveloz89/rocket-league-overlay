@@ -948,3 +948,86 @@ def test_ball_team_rejects_invalid_payload():
     out = agg.to_overlay_dict()
     assert out["context"]["ball_speed"] == 0.0
     assert out["context"]["ball_team"] is None
+
+
+# ── Lobby roster ────────────────────────────────────────────────────────────
+
+
+def test_overlay_dict_exposes_slim_players():
+    """to_overlay_dict surfaces a slim per-player payload for the compact roster."""
+    agg = MatchAggregator()
+    agg.me_id, agg.me_name = "Steam|1|0", "alas"
+    agg.on_initialized({"MatchGuid": "M1"})
+    agg.on_update_state(make_state(me_boost=42))
+
+    out = agg.to_overlay_dict()
+    assert len(out["players"]) == 2
+    me = next(p for p in out["players"] if p["is_me"])
+    opp = next(p for p in out["players"] if not p["is_me"])
+    assert me == {"id": "Steam|1|0", "name": "alas", "team": 0, "boost": 42, "is_me": True}
+    assert opp["name"] == "jstn"
+    assert opp["team"] == 1
+    assert opp["boost"] == 60
+
+
+def test_overlay_dict_players_skips_entries_without_id_or_name():
+    """A spectator or transient placeholder slot must not show up in the roster."""
+    agg = MatchAggregator()
+    agg.on_initialized({"MatchGuid": "M1"})
+    s = make_state()
+    s["Players"].append({"Name": "", "PrimaryId": None, "TeamNum": 1, "Boost": 0})
+    s["Players"].append({"Name": "ghost", "TeamNum": 0, "Boost": 0})  # no PrimaryId
+    agg.on_update_state(s)
+
+    out = agg.to_overlay_dict()
+    assert len(out["players"]) == 2  # only the two real players
+
+
+def test_to_db_snapshots_returns_me_plus_others():
+    """to_db_snapshots yields the enriched me-row + a slim row per other player."""
+    agg = MatchAggregator()
+    agg.me_id, agg.me_name = "Steam|1|0", "alas"
+    agg.on_initialized({"MatchGuid": "M1"})
+    agg.on_update_state(make_state(blue=2, orange=1))
+
+    snaps = agg.to_db_snapshots()
+    assert len(snaps) == 2
+    me_snap = next(s for s in snaps if s["player_id"] == "Steam|1|0")
+    opp_snap = next(s for s in snaps if s["player_id"] == "Epic|2|0")
+
+    # me-row carries derived metrics (boost_avg, time_supersonic_pct, ...)
+    assert "boost_avg" in me_snap
+    assert me_snap["me_team"] == 0
+    assert me_snap["won"] is True
+
+    # other-row is slim — only end-of-match player stats
+    assert opp_snap["player_name"] == "jstn"
+    assert opp_snap["me_team"] == 1
+    assert opp_snap["won"] is False
+    assert opp_snap["goals"] == 0
+    assert opp_snap["assists"] == 1
+    assert "boost_avg" not in opp_snap  # derived metrics are not built for non-me players
+
+
+def test_to_db_snapshots_skips_me_row_without_identity():
+    """If me_id was never detected, only the non-me rows are emitted."""
+    agg = MatchAggregator()
+    agg.on_initialized({"MatchGuid": "M1"})
+    agg.on_update_state(make_state())
+
+    snaps = agg.to_db_snapshots()
+    # Both Players have a PrimaryId so both come through; no me-row added
+    assert len(snaps) == 2
+    assert all(s.get("player_id") for s in snaps)
+
+
+def test_won_for_team_handles_each_side():
+    """The per-team won() helper used for non-me rows must mirror won() for me."""
+    agg = MatchAggregator()
+    agg.blue_score = 3
+    agg.orange_score = 1
+    assert agg._won_for_team(0) is True
+    assert agg._won_for_team(1) is False
+    assert agg._won_for_team(-1) is None
+    agg.orange_score = 3
+    assert agg._won_for_team(0) is None  # tie
