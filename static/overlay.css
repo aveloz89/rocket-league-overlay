@@ -194,8 +194,18 @@ button:focus-visible {
   flex-basis: 100%;
   display: flex;
   flex-wrap: wrap;
+  align-items: center;
   gap: var(--space-1);
   padding-top: var(--space-2);
+}
+
+.mode-tabs-label {
+  font-size: 0.625rem;
+  letter-spacing: 0.18em;
+  color: var(--muted);
+  text-transform: uppercase;
+  font-weight: 700;
+  margin-right: var(--space-2);
 }
 
 .mode-tab {
@@ -220,6 +230,14 @@ button:focus-visible {
   background: var(--accent);
   color: var(--fg-inverse);
   border-color: var(--accent);
+}
+
+/* Default focus-visible outline is --accent; on the active tab the accent
+ * is also the background, so swap the outline to the inverse foreground
+ * and add offset so the ring is visible. */
+.mode-tab[aria-pressed="true"]:focus-visible {
+  outline-color: var(--fg-inverse);
+  outline-offset: 3px;
 }
 
 /* ── Layout ─────────────────────────────────────────────────────────── */
@@ -283,7 +301,7 @@ button:focus-visible {
   font-weight: 800;
 }
 .banner.replay { background: #c084fc; color: var(--fg-inverse); }
-.banner.overtime { background: var(--bad); color: #fff; }
+.banner.overtime { background: var(--bad); color: var(--fg); }
 
 .goal-banner {
   align-self: center;
@@ -298,7 +316,7 @@ button:focus-visible {
   letter-spacing: 0.04em;
 }
 
-.goal-banner[data-team="blue"] { background: var(--blue); color: #fff; }
+.goal-banner[data-team="blue"] { background: var(--blue); color: var(--fg); }
 .goal-banner[data-team="orange"] { background: var(--orange); color: var(--fg-inverse); }
 
 .goal-banner-label {
@@ -340,7 +358,7 @@ button:focus-visible {
 .live-pill {
   display: inline-flex;
   align-items: baseline;
-  gap: 0.25rem;
+  gap: var(--space-1);
 }
 .live-pill .pill-k {
   text-transform: uppercase;
@@ -392,10 +410,14 @@ button:focus-visible {
   padding: var(--space-2) var(--space-3);
   background: var(--bg-inset);
   border-radius: var(--radius-sm);
+  border-left: 3px solid;
   display: flex;
   flex-direction: column;
   gap: var(--space-1);
 }
+
+.roster.blue   { border-left-color: var(--blue); }
+.roster.orange { border-left-color: var(--orange); }
 
 .roster-row {
   display: grid;
