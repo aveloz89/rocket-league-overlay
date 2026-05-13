@@ -1227,3 +1227,92 @@ def test_last_goal_resets_on_new_match():
 
     agg.on_initialized({"MatchGuid": "M2"})
     assert agg.last_goal is None
+
+
+# ── Per-player touch tracking ───────────────────────────────────────────────
+
+
+def test_on_ball_hit_tracks_speeds_for_every_hitter_with_id():
+    agg = MatchAggregator()
+    agg.on_initialized({"MatchGuid": "M1"})
+
+    agg.on_ball_hit({
+        "Ball": {"PostHitSpeed": 80.0},
+        "Players": [
+            {"PrimaryId": "Steam|1|0", "Name": "alas", "TeamNum": 0},
+            {"PrimaryId": "Epic|2|0", "Name": "jstn", "TeamNum": 1},
+        ],
+    })
+    agg.on_ball_hit({
+        "Ball": {"PostHitSpeed": 110.0},
+        "Players": [{"PrimaryId": "Steam|1|0", "Name": "alas", "TeamNum": 0}],
+    })
+
+    assert agg.player_hit_speeds["Steam|1|0"] == [80.0, 110.0]
+    assert agg.player_hit_speeds["Epic|2|0"] == [80.0]
+    assert len(agg.touch_events) == 3
+    assert agg.touch_events[0]["player_id"] == "Steam|1|0"
+    assert agg.touch_events[0]["post_hit_speed"] == 80.0
+
+
+def test_on_ball_hit_skips_hitters_without_primary_id():
+    """Spectator-style entries without PrimaryId must not pollute the buffers."""
+    agg = MatchAggregator()
+    agg.on_initialized({"MatchGuid": "M1"})
+
+    agg.on_ball_hit({
+        "Ball": {"PostHitSpeed": 50.0},
+        "Players": [
+            {"Name": "ghost", "TeamNum": 0},  # no PrimaryId
+            {"PrimaryId": "Steam|1|0", "Name": "alas", "TeamNum": 0},
+        ],
+    })
+
+    assert list(agg.player_hit_speeds.keys()) == ["Steam|1|0"]
+    assert len(agg.touch_events) == 1
+
+
+def test_build_player_snapshot_derives_touch_aggregates():
+    """Non-me rows get ball_hits / hardest_hit / avg_shot_power from the
+    per-player speed buffer."""
+    agg = MatchAggregator()
+    agg.me_id, agg.me_name = "Steam|1|0", "alas"
+    agg.on_initialized({"MatchGuid": "M1"})
+    agg.on_update_state(make_state(blue=2, orange=1))
+
+    for speed in (40.0, 60.0, 95.0):
+        agg.on_ball_hit({
+            "Ball": {"PostHitSpeed": speed},
+            "Players": [{"PrimaryId": "Epic|2|0", "Name": "jstn", "TeamNum": 1}],
+        })
+
+    snaps = agg.to_db_snapshots()
+    opp = next(s for s in snaps if s["player_id"] == "Epic|2|0")
+    assert opp["ball_hits"] == 3
+    assert opp["hardest_hit"] == 95.0
+    assert opp["avg_shot_power"] == round((40 + 60 + 95) / 3, 1)
+
+
+def test_touch_buffers_reset_on_new_match():
+    agg = MatchAggregator()
+    agg.on_initialized({"MatchGuid": "M1"})
+    agg.on_ball_hit({
+        "Ball": {"PostHitSpeed": 50.0},
+        "Players": [{"PrimaryId": "Steam|1|0", "Name": "alas", "TeamNum": 0}],
+    })
+    assert agg.player_hit_speeds and agg.touch_events
+
+    agg.on_initialized({"MatchGuid": "M2"})
+    assert agg.player_hit_speeds == {}
+    assert agg.touch_events == []
+
+
+def test_ball_hit_ignored_before_match_initialized():
+    """Touches that arrive before MatchInitialized are dropped silently."""
+    agg = MatchAggregator()
+    agg.on_ball_hit({
+        "Ball": {"PostHitSpeed": 50.0},
+        "Players": [{"PrimaryId": "Steam|1|0", "Name": "alas", "TeamNum": 0}],
+    })
+    assert agg.player_hit_speeds == {}
+    assert agg.touch_events == []

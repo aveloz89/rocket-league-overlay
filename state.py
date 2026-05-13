@@ -216,6 +216,13 @@ class MatchAggregator:
     # overlay can render a banner. Client de-dupes by occurred_at.
     last_goal: dict | None = None
 
+    # Per-player touch tracking. `player_hit_speeds[pid]` collects every
+    # PostHitSpeed for that PrimaryId — feeds non-me row aggregates in
+    # _build_player_snapshot. `touch_events` is the granular per-touch buffer
+    # flushed to the ball_touches table on match-end.
+    player_hit_speeds: dict[str, list[float]] = field(default_factory=dict, repr=False)
+    touch_events: list[dict] = field(default_factory=list, repr=False)
+
     def reset_match(self, match_guid: str) -> None:
         keep = (self.me_id, self.me_name)
         self.__init__()  # type: ignore[misc]
@@ -347,6 +354,24 @@ class MatchAggregator:
             t = hitter.get("TeamNum")
             if t in (0, 1):
                 self.team_hits[t] = self.team_hits.get(t, 0) + 1
+
+        # Per-player tracking: aggregates for the non-me snapshot rows, and a
+        # granular row per touch for the ball_touches table.
+        if self.match_guid is not None:
+            occurred_at = datetime.now(timezone.utc).isoformat()
+            for hitter in hitters:
+                pid = hitter.get("PrimaryId")
+                if not pid:
+                    continue
+                self.player_hit_speeds.setdefault(pid, []).append(post)
+                team_num = hitter.get("TeamNum")
+                self.touch_events.append({
+                    "player_id": pid,
+                    "player_name": hitter.get("Name"),
+                    "team": team_num if team_num in (0, 1) else None,
+                    "post_hit_speed": post,
+                    "occurred_at": occurred_at,
+                })
 
         if not self.me_name:
             return
@@ -779,9 +804,11 @@ class MatchAggregator:
 
     def _build_player_snapshot(self, p: dict) -> dict:
         team = p.get("TeamNum", -1)
+        pid = p.get("PrimaryId")
+        speeds = self.player_hit_speeds.get(pid, []) if pid else []
         return {
             "match_guid": self.match_guid,
-            "player_id": p.get("PrimaryId"),
+            "player_id": pid,
             "player_name": p.get("Name"),
             "started_at": self.started_at.isoformat() if self.started_at else None,
             "ended_at": datetime.now(timezone.utc).isoformat(),
@@ -797,6 +824,9 @@ class MatchAggregator:
             "assists": p.get("Assists", 0),
             "demos": p.get("Demos", 0),
             "touches": p.get("Touches", 0),
+            "ball_hits": len(speeds),
+            "hardest_hit": round(max(speeds), 1) if speeds else 0.0,
+            "avg_shot_power": round(sum(speeds) / len(speeds), 1) if speeds else 0.0,
         }
 
     def to_db_snapshot(self) -> dict:

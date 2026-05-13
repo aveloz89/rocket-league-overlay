@@ -138,6 +138,18 @@ CREATE TABLE IF NOT EXISTS match_events (
 CREATE INDEX IF NOT EXISTS idx_match_events_guid ON match_events(match_guid);
 CREATE INDEX IF NOT EXISTS idx_match_events_type ON match_events(type);
 
+CREATE TABLE IF NOT EXISTS ball_touches (
+    id INTEGER PRIMARY KEY,
+    match_guid TEXT NOT NULL,
+    player_id TEXT NOT NULL,
+    player_name TEXT,
+    team INTEGER,
+    post_hit_speed REAL,
+    occurred_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_ball_touches_guid ON ball_touches(match_guid);
+CREATE INDEX IF NOT EXISTS idx_ball_touches_player ON ball_touches(player_id);
+
 CREATE TABLE IF NOT EXISTS matches (
     id INTEGER PRIMARY KEY,
     match_guid TEXT NOT NULL,
@@ -268,6 +280,37 @@ def get_match_events(conn: sqlite3.Connection, match_guid: str) -> list[dict]:
             "payload": payload,
         })
     return out
+
+
+def save_ball_touches(
+    conn: sqlite3.Connection, match_guid: str | None, touches: list[dict]
+) -> int:
+    """Insert every buffered ball touch. Returns the number of rows written.
+
+    Same caller-clears-buffer convention as save_match_events: there is no
+    UNIQUE constraint so replaying the same list would duplicate rows.
+    """
+    if not match_guid or not touches:
+        return 0
+    rows = [
+        (
+            match_guid,
+            touch["player_id"],
+            touch.get("player_name"),
+            touch.get("team"),
+            touch.get("post_hit_speed"),
+            touch["occurred_at"],
+        )
+        for touch in touches
+    ]
+    conn.executemany(
+        "INSERT INTO ball_touches "
+        "(match_guid, player_id, player_name, team, post_hit_speed, occurred_at) "
+        "VALUES (?, ?, ?, ?, ?, ?)",
+        rows,
+    )
+    conn.commit()
+    return len(rows)
 
 
 def save_match_events(

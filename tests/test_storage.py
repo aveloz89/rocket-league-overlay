@@ -12,6 +12,7 @@ from storage import (  # noqa: E402
     coach_stats,
     get_match_events,
     open_db,
+    save_ball_touches,
     save_match,
     save_match_events,
     today_stats,
@@ -809,6 +810,43 @@ def test_coach_stats_last_match_events_empty_when_no_last_match(tmp_path):
     db = open_db(tmp_path / "stats.db")
     result = coach_stats(db, "Steam|1|0")
     assert result["last_match_events"] == []
+
+
+# ── ball_touches ────────────────────────────────────────────────────────────
+
+
+def test_open_db_creates_ball_touches_table(tmp_path):
+    db = open_db(tmp_path / "stats.db")
+    cols = {row[1] for row in db.execute("PRAGMA table_info(ball_touches)")}
+    assert {"id", "match_guid", "player_id", "player_name", "team",
+            "post_hit_speed", "occurred_at"} <= cols
+
+
+def test_save_ball_touches_persists_rows(tmp_path):
+    db = open_db(tmp_path / "stats.db")
+    touches = [
+        {"player_id": "Steam|1|0", "player_name": "alas", "team": 0,
+         "post_hit_speed": 92.5, "occurred_at": "2026-05-13T20:00:01+00:00"},
+        {"player_id": "Epic|2|0", "player_name": "jstn", "team": 1,
+         "post_hit_speed": 60.0, "occurred_at": "2026-05-13T20:00:02+00:00"},
+    ]
+
+    inserted = save_ball_touches(db, "M1", touches)
+    assert inserted == 2
+
+    rows = db.execute(
+        "SELECT player_name, team, post_hit_speed FROM ball_touches "
+        "WHERE match_guid='M1' ORDER BY id"
+    ).fetchall()
+    assert rows == [("alas", 0, 92.5), ("jstn", 1, 60.0)]
+
+
+def test_save_ball_touches_noop_for_empty_inputs(tmp_path):
+    db = open_db(tmp_path / "stats.db")
+    assert save_ball_touches(db, "M1", []) == 0
+    assert save_ball_touches(db, None, [
+        {"player_id": "x", "occurred_at": "y", "post_hit_speed": 1.0}
+    ]) == 0
 
 
 def test_migration_adds_team_size_column_to_existing_db(tmp_path):
