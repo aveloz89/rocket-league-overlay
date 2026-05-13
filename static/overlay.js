@@ -108,6 +108,28 @@
     }
 
     renderRosters(snap.players);
+    renderTeamTotals(snap.teams);
+  };
+
+  // ── Team totals ──────────────────────────────────────────────────
+
+  const renderTeamTotals = (teams) => {
+    const section = $("team-totals");
+    if (!teams) {
+      section.hidden = true;
+      return;
+    }
+    section.hidden = false;
+    const blue = teams.blue ?? {};
+    const orange = teams.orange ?? {};
+    $("tt-blue-goals").textContent = blue.goals ?? 0;
+    $("tt-blue-saves").textContent = blue.saves ?? 0;
+    $("tt-blue-assists").textContent = blue.assists ?? 0;
+    $("tt-blue-demos").textContent = blue.demos ?? 0;
+    $("tt-orange-goals").textContent = orange.goals ?? 0;
+    $("tt-orange-saves").textContent = orange.saves ?? 0;
+    $("tt-orange-assists").textContent = orange.assists ?? 0;
+    $("tt-orange-demos").textContent = orange.demos ?? 0;
   };
 
   // ── Compact rosters ──────────────────────────────────────────────
