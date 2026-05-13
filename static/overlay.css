@@ -378,6 +378,48 @@ button:focus-visible {
   font-weight: 600;
 }
 
+/* Score gets a touch of emphasis without becoming a separate card. */
+.live-pill.score .pill-k { color: var(--accent); }
+.live-pill.score .pill-v { font-size: 1rem; }
+
+/* ── Match details disclosure ───────────────────────────────────────── */
+
+.match-details {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.match-details > summary {
+  cursor: pointer;
+  list-style: none;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-1) 0;
+  border-bottom: 1px dashed var(--border);
+  font-size: 0.625rem;
+  letter-spacing: 0.25em;
+  color: var(--muted);
+  text-transform: uppercase;
+  font-weight: 700;
+}
+
+.match-details > summary::-webkit-details-marker { display: none; }
+
+.match-details > summary::before {
+  content: "▸";
+  color: var(--accent);
+  display: inline-block;
+  transition: transform 0.15s ease;
+}
+
+.match-details[open] > summary::before {
+  transform: rotate(90deg);
+}
+
+.match-details > summary:hover { color: var(--fg); }
+
 .live-grids {
   display: grid;
   grid-template-columns: 1fr;
