@@ -241,6 +241,35 @@ def open_db(path: Path = DB_PATH) -> sqlite3.Connection:
     return conn
 
 
+def get_match_events(conn: sqlite3.Connection, match_guid: str) -> list[dict]:
+    """Return events for the given match_guid ordered by occurrence.
+
+    `payload` is decoded from JSON; an empty dict is returned if the column
+    is NULL or unparseable so callers don't have to handle either case.
+    """
+    if not match_guid:
+        return []
+    cur = conn.execute(
+        "SELECT type, actor_name, actor_team, occurred_at, payload "
+        "FROM match_events WHERE match_guid = ? ORDER BY occurred_at, id",
+        (match_guid,),
+    )
+    out: list[dict] = []
+    for type_name, actor_name, actor_team, occurred_at, payload_json in cur.fetchall():
+        try:
+            payload = json.loads(payload_json) if payload_json else {}
+        except json.JSONDecodeError:
+            payload = {}
+        out.append({
+            "type": type_name,
+            "actor_name": actor_name,
+            "actor_team": actor_team,
+            "occurred_at": occurred_at,
+            "payload": payload,
+        })
+    return out
+
+
 def save_match_events(
     conn: sqlite3.Connection, match_guid: str | None, events: list[dict]
 ) -> int:
@@ -674,11 +703,13 @@ def coach_stats(
         if last and rolling_count >= COACH_INSIGHT_MIN_SAMPLES
         else []
     )
+    last_events = get_match_events(conn, last["match_guid"]) if last else []
     return {
         "last_match": last,
         "rolling_avg": avg,
         "trend": trend,
         "insights": insights,
+        "last_match_events": last_events,
         "today": today_stats(conn, player_id, mode),
         "rank_benchmark": _build_rank_benchmark(target_rank),
     }

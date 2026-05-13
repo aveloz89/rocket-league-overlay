@@ -9,6 +9,7 @@
   const hero = $("hero");
   const cats = $("cats");
   const trendSection = $("trend-section");
+  const eventsSection = $("events-section");
   const todayDetail = $("today-detail");
   const banner = $("banner");
   const headerScoreline = $("header-scoreline");
@@ -109,6 +110,40 @@
 
     renderRosters(snap.players);
     renderTeamTotals(snap.teams);
+    maybeShowGoalBanner(snap.last_goal);
+  };
+
+  // ── Goal banner ──────────────────────────────────────────────────
+
+  const GOAL_BANNER_HOLD_MS = 4500;
+  let lastGoalTs = null;
+  let goalBannerTimer = null;
+
+  const maybeShowGoalBanner = (lastGoal) => {
+    if (!lastGoal || lastGoal.occurred_at === lastGoalTs) return;
+    lastGoalTs = lastGoal.occurred_at;
+
+    const banner = $("goal-banner");
+    const text = $("goal-banner-text");
+    const speed = typeof lastGoal.payload?.speed === "number"
+      ? ` — ${Math.round(lastGoal.payload.speed)} mph`
+      : "";
+    text.textContent = `${lastGoal.actor_name ?? "?"}${speed}`;
+    banner.dataset.team =
+      lastGoal.actor_team === 0 ? "blue" :
+      lastGoal.actor_team === 1 ? "orange" : "";
+
+    // Force a restart of the CSS pulse animation on consecutive goals
+    banner.classList.remove("show");
+    void banner.offsetWidth;
+    banner.hidden = false;
+    banner.classList.add("show");
+
+    clearTimeout(goalBannerTimer);
+    goalBannerTimer = setTimeout(() => {
+      banner.hidden = true;
+      banner.classList.remove("show");
+    }, GOAL_BANNER_HOLD_MS);
   };
 
   // ── Team totals ──────────────────────────────────────────────────
@@ -432,6 +467,7 @@
       hero.hidden = true;
       cats.hidden = true;
       trendSection.hidden = true;
+      eventsSection.hidden = true;
       return;
     }
     empty.hidden = true;
@@ -468,7 +504,61 @@
     renderRows("cat-boost", BOOST_ROWS, last, avg, benchmark);
     renderRows("cat-mech", MECH_ROWS, last, avg, benchmark);
     renderRows("cat-highlights", HIGHLIGHT_ROWS, last, avg, benchmark);
+    renderEvents(data.last_match_events ?? []);
     renderTrend(data.trend);
+  };
+
+  // ── Events timeline ──────────────────────────────────────────────
+
+  const EVENT_LABELS = {
+    goal: "Goal",
+    countdown_begin: "Countdown",
+    round_started: "Round start",
+    match_paused: "Paused",
+    match_unpaused: "Resumed",
+  };
+
+  const renderEvents = (events) => {
+    const list = $("events-list");
+    if (!events || events.length === 0) {
+      eventsSection.hidden = true;
+      return;
+    }
+    eventsSection.hidden = false;
+    list.replaceChildren();
+
+    const baseMs = Date.parse(events[0].occurred_at);
+
+    for (const evt of events) {
+      const li = document.createElement("li");
+      li.className = "event-row";
+      li.dataset.type = evt.type;
+      if (evt.actor_team === 0) li.dataset.team = "blue";
+      else if (evt.actor_team === 1) li.dataset.team = "orange";
+
+      const t = document.createElement("span");
+      t.className = "event-time";
+      const elapsedSec = Math.max(0, Math.round((Date.parse(evt.occurred_at) - baseMs) / 1000));
+      const mins = Math.floor(elapsedSec / 60);
+      const secs = elapsedSec % 60;
+      t.textContent = `${mins}:${String(secs).padStart(2, "0")}`;
+
+      const label = document.createElement("span");
+      label.className = "event-label";
+      label.textContent = EVENT_LABELS[evt.type] ?? evt.type;
+
+      const detail = document.createElement("span");
+      detail.className = "event-detail";
+      if (evt.type === "goal") {
+        const speed = typeof evt.payload?.speed === "number"
+          ? ` · ${Math.round(evt.payload.speed)} mph`
+          : "";
+        detail.textContent = `${evt.actor_name ?? "?"}${speed}`;
+      }
+
+      li.append(t, label, detail);
+      list.appendChild(li);
+    }
   };
 
   // ── Mode filter (1v1 / 2v2 / 3v3 / All) ──────────────────────────

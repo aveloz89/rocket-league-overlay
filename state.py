@@ -212,6 +212,10 @@ class MatchAggregator:
     # match snapshot is persisted; cleared on reset_match via __init__.
     events: list[dict] = field(default_factory=list, repr=False)
 
+    # Latest goal payload — keeps a copy of the most recent goal event so the
+    # overlay can render a banner. Client de-dupes by occurred_at.
+    last_goal: dict | None = None
+
     def reset_match(self, match_guid: str) -> None:
         keep = (self.me_id, self.me_name)
         self.__init__()  # type: ignore[misc]
@@ -402,7 +406,8 @@ class MatchAggregator:
         setattr(self, attr, getattr(self, attr) + 1)
 
     def on_goal_scored(self, data: dict) -> None:
-        """Buffer a 'goal' event with scorer attribution and goal speed/time."""
+        """Buffer a 'goal' event with scorer attribution and goal speed/time,
+        and stash a copy on last_goal for the live overlay banner."""
         scorer = _scorer_info(data)
         payload: dict = {}
         speed = data.get("GoalSpeed")
@@ -412,6 +417,8 @@ class MatchAggregator:
         if isinstance(elapsed, (int, float)):
             payload["time"] = float(elapsed)
         self._record_event("goal", actor=scorer, payload=payload)
+        if self.match_guid is not None and self.events:
+            self.last_goal = dict(self.events[-1])
 
     def on_countdown_begin(self, data: dict) -> None:
         """Buffer the pre-kickoff countdown marker (no actor)."""
@@ -713,6 +720,7 @@ class MatchAggregator:
                 if p.get("PrimaryId") and p.get("Name")
             ],
             "teams": self._team_totals(),
+            "last_goal": self.last_goal,
             "context": {
                 "blue": self.blue_score,
                 "orange": self.orange_score,

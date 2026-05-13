@@ -8,7 +8,14 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from storage import coach_stats, open_db, save_match, save_match_events, today_stats  # noqa: E402
+from storage import (  # noqa: E402
+    coach_stats,
+    get_match_events,
+    open_db,
+    save_match,
+    save_match_events,
+    today_stats,
+)
 
 
 def make_snapshot(match_guid="M1", won=True, **overrides):
@@ -762,6 +769,46 @@ def test_save_match_events_noop_for_empty_inputs(tmp_path):
     db = open_db(tmp_path / "stats.db")
     assert save_match_events(db, "M1", []) == 0
     assert save_match_events(db, None, [{"type": "goal", "occurred_at": "x"}]) == 0
+
+
+def test_get_match_events_round_trips_with_payload(tmp_path):
+    db = open_db(tmp_path / "stats.db")
+    save_match_events(db, "M1", [
+        {"type": "countdown_begin", "occurred_at": "2026-05-13T20:00:00+00:00", "payload": {}},
+        {"type": "goal", "actor_id": "Steam|1|0", "actor_name": "alas", "actor_team": 0,
+         "occurred_at": "2026-05-13T20:01:14+00:00", "payload": {"speed": 78.1}},
+    ])
+
+    events = get_match_events(db, "M1")
+    assert [e["type"] for e in events] == ["countdown_begin", "goal"]
+    assert events[1]["actor_name"] == "alas"
+    assert events[1]["payload"] == {"speed": 78.1}
+    assert events[0]["payload"] == {}
+
+
+def test_get_match_events_empty_for_unknown_guid(tmp_path):
+    db = open_db(tmp_path / "stats.db")
+    assert get_match_events(db, "DOESNT_EXIST") == []
+    assert get_match_events(db, "") == []
+
+
+def test_coach_stats_includes_last_match_events(tmp_path):
+    db = open_db(tmp_path / "stats.db")
+    save_match(db, make_snapshot(match_guid="WITH_EVENTS"))
+    save_match_events(db, "WITH_EVENTS", [
+        {"type": "goal", "actor_name": "alas", "actor_team": 0,
+         "occurred_at": "2026-04-30T20:02:00+00:00", "payload": {"speed": 80.0}},
+    ])
+
+    result = coach_stats(db, "Steam|1|0")
+    assert len(result["last_match_events"]) == 1
+    assert result["last_match_events"][0]["actor_name"] == "alas"
+
+
+def test_coach_stats_last_match_events_empty_when_no_last_match(tmp_path):
+    db = open_db(tmp_path / "stats.db")
+    result = coach_stats(db, "Steam|1|0")
+    assert result["last_match_events"] == []
 
 
 def test_migration_adds_team_size_column_to_existing_db(tmp_path):
