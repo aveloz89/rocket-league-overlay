@@ -656,6 +656,29 @@ class MatchAggregator:
     def won(self) -> bool | None:
         return self._won_for_team(self.me_team)
 
+    def _team_totals(self) -> dict:
+        """Sum Goals/Saves/Assists/Demos per team across the live Players[].
+
+        Distinct from blue_score/orange_score (which come from Game.Teams[].Score)
+        — those are the final scoreline, this is the per-team aggregation of
+        individual player counters. They usually agree on Goals but expose
+        Saves/Assists/Demos macro views that the scoreline can't.
+        """
+        totals = {0: {"goals": 0, "saves": 0, "assists": 0, "demos": 0},
+                  1: {"goals": 0, "saves": 0, "assists": 0, "demos": 0}}
+        for p in self._latest_players:
+            team = p.get("TeamNum")
+            if team not in (0, 1):
+                continue
+            for field_name, payload_key in (
+                ("goals", "Goals"),
+                ("saves", "Saves"),
+                ("assists", "Assists"),
+                ("demos", "Demos"),
+            ):
+                totals[team][field_name] += int(p.get(payload_key, 0) or 0)
+        return {"blue": totals[0], "orange": totals[1]}
+
     def _won_for_team(self, team: int) -> bool | None:
         if team not in (0, 1):
             return None
@@ -679,6 +702,7 @@ class MatchAggregator:
                 for p in self._latest_players
                 if p.get("PrimaryId") and p.get("Name")
             ],
+            "teams": self._team_totals(),
             "context": {
                 "blue": self.blue_score,
                 "orange": self.orange_score,

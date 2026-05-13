@@ -1122,3 +1122,66 @@ def test_event_ignored_when_no_match_active():
     agg.on_goal_scored({"Scorer": {"Name": "alas"}})
     agg.on_countdown_begin({})
     assert agg.events == []
+
+
+# ── Team totals (macro view) ────────────────────────────────────────────────
+
+
+def test_team_totals_sum_per_team():
+    """teams.{blue,orange} aggregate Goals/Saves/Assists/Demos across the live
+    Players[]. Distinct from blue_score/orange_score which come from Game.Teams."""
+    agg = MatchAggregator()
+    agg.me_id, agg.me_name = "Steam|1|0", "alas"
+    agg.on_initialized({"MatchGuid": "M1"})
+
+    s = make_state()
+    s["Players"] = [
+        {"Name": "alas", "PrimaryId": "Steam|1|0", "TeamNum": 0,
+         "Score": 0, "Goals": 1, "Saves": 2, "Assists": 0, "Demos": 1,
+         "Shots": 0, "Touches": 0, "Boost": 0, "Speed": 0,
+         "bOnGround": True, "bHasCar": True},
+        {"Name": "tide", "PrimaryId": "Steam|2|0", "TeamNum": 0,
+         "Score": 0, "Goals": 0, "Saves": 1, "Assists": 2, "Demos": 0,
+         "Shots": 0, "Touches": 0, "Boost": 0, "Speed": 0,
+         "bOnGround": True, "bHasCar": True},
+        {"Name": "jstn", "PrimaryId": "Epic|4|0", "TeamNum": 1,
+         "Score": 0, "Goals": 2, "Saves": 0, "Assists": 1, "Demos": 0,
+         "Shots": 0, "Touches": 0, "Boost": 0, "Speed": 0,
+         "bOnGround": True, "bHasCar": True},
+    ]
+    agg.on_update_state(s)
+
+    out = agg.to_overlay_dict()
+    assert out["teams"]["blue"] == {"goals": 1, "saves": 3, "assists": 2, "demos": 1}
+    assert out["teams"]["orange"] == {"goals": 2, "saves": 0, "assists": 1, "demos": 0}
+
+
+def test_team_totals_skip_players_without_team():
+    """Spectators / placeholders without TeamNum 0/1 must not contribute."""
+    agg = MatchAggregator()
+    agg.on_initialized({"MatchGuid": "M1"})
+
+    s = make_state()
+    # Override with a single legit player + a spectator-style entry
+    s["Players"] = [
+        {"Name": "alas", "PrimaryId": "Steam|1|0", "TeamNum": 0,
+         "Score": 0, "Goals": 3, "Saves": 0, "Assists": 0, "Demos": 0,
+         "Shots": 0, "Touches": 0, "Boost": 0, "Speed": 0,
+         "bOnGround": True, "bHasCar": True},
+        {"Name": "spec", "PrimaryId": "Steam|9|0", "TeamNum": 99,
+         "Goals": 100, "Saves": 100},  # bogus team
+    ]
+    agg.on_update_state(s)
+
+    out = agg.to_overlay_dict()
+    assert out["teams"]["blue"]["goals"] == 3
+    assert out["teams"]["orange"]["goals"] == 0
+
+
+def test_team_totals_zero_when_no_players():
+    agg = MatchAggregator()
+    out = agg.to_overlay_dict()
+    assert out["teams"] == {
+        "blue":   {"goals": 0, "saves": 0, "assists": 0, "demos": 0},
+        "orange": {"goals": 0, "saves": 0, "assists": 0, "demos": 0},
+    }

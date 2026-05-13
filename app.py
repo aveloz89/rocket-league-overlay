@@ -303,6 +303,10 @@ DEMO_MATCH_SNAPSHOT = {
         {"id": "Epic|5|0", "name": "zen", "team": 1, "boost": 54, "is_me": False},
         {"id": "Epic|6|0", "name": "flux", "team": 1, "boost": 11, "is_me": False},
     ],
+    "teams": {
+        "blue":   {"goals": 2, "saves": 6, "assists": 2, "demos": 2},
+        "orange": {"goals": 1, "saves": 4, "assists": 2, "demos": 1},
+    },
     "context": {
         "blue": 2, "orange": 1, "clock": 187,
         "overtime": False, "replay": False, "arena": "cs_p",

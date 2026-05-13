@@ -398,6 +398,42 @@ button:focus-visible {
 .roster.blue .roster-bar-fill { background: var(--blue); }
 .roster.orange .roster-bar-fill { background: var(--orange); }
 
+/* ── Team totals ────────────────────────────────────────────────────── */
+
+.team-totals {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: var(--space-2);
+}
+
+@media (min-width: 720px) {
+  .team-totals {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+
+.team-totals-card {
+  background: var(--bg-inset);
+  border-radius: var(--radius-sm);
+  padding: var(--space-2) var(--space-3);
+  border-left: 3px solid;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.team-totals-card.blue { border-left-color: var(--blue); }
+.team-totals-card.orange { border-left-color: var(--orange); }
+
+.team-totals-card .team-label {
+  font-size: 0.625rem;
+  letter-spacing: 0.25em;
+  font-weight: 700;
+}
+
+.team-totals-card.blue .team-label { color: var(--blue); }
+.team-totals-card.orange .team-label { color: var(--orange); }
+
 /* ── Big stat cards (score, today record) ──────────────────────────── */
 
 .big-stats {
