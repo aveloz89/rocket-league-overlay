@@ -271,6 +271,14 @@ def handle_event(event: dict) -> None:
         agg.on_round_started(data)
         return
 
+    if name == "MatchPaused":
+        agg.on_match_paused(data)
+        return
+
+    if name == "MatchUnpaused":
+        agg.on_match_unpaused(data)
+        return
+
     if name in MATCH_END_EVENTS:
         _persist_current_match()
         _broadcast_today()

@@ -1106,6 +1106,20 @@ def test_kickoff_cycle_events_buffered_without_actor():
         assert e["actor_team"] is None
 
 
+def test_pause_unpause_buffered_as_markers():
+    agg = MatchAggregator()
+    agg.on_initialized({"MatchGuid": "M1"})
+
+    agg.on_match_paused({})
+    agg.on_match_unpaused({})
+
+    types = [e["type"] for e in agg.events]
+    assert types == ["match_paused", "match_unpaused"]
+    for e in agg.events:
+        assert e["actor_id"] is None
+        assert e["payload"] == {}
+
+
 def test_events_buffer_resets_on_new_match():
     agg = MatchAggregator()
     agg.on_initialized({"MatchGuid": "M1"})

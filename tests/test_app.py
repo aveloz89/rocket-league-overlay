@@ -202,6 +202,20 @@ def test_goal_scored_persists_to_match_events_on_end(fresh_state):
     assert {r[0] for r in rows} == {"goal", "countdown_begin", "round_started"}
 
 
+def test_pause_unpause_events_dispatched_and_persisted(fresh_state):
+    """MatchPaused and MatchUnpaused round-trip into match_events on MatchEnded."""
+    app.agg.me_id, app.agg.me_name = "Steam|1|0", "alas"
+    app.handle_event({"Event": "MatchInitialized", "Data": {"MatchGuid": "M_PAUSE"}})
+    app.handle_event({"Event": "MatchPaused", "Data": {}})
+    app.handle_event({"Event": "MatchUnpaused", "Data": {}})
+    app.handle_event({"Event": "MatchEnded", "Data": {"MatchGuid": "M_PAUSE"}})
+
+    rows = app.db.execute(
+        "SELECT type FROM match_events WHERE match_guid='M_PAUSE' ORDER BY id"
+    ).fetchall()
+    assert [r[0] for r in rows] == ["match_paused", "match_unpaused"]
+
+
 def test_event_buffer_does_not_double_insert(fresh_state):
     """Calling _persist_current_match twice (MatchEnded then a stale guid
     rotation) must NOT duplicate event rows — the buffer drains on first flush."""
