@@ -46,7 +46,11 @@ BUNDLED_INI = _resource_path("DefaultStatsAPI.ini")
 # already show in the in-game HUD, so we don't need frame-rate updates here.
 # Discrete events (BallHit, goals, shots) still broadcast immediately.
 UPDATE_STATE_MIN_INTERVAL = 5.0
-MATCH_END_EVENTS = {"MatchEnded", "PodiumStart"}
+# MatchDestroyed fires when the user closes RL or leaves a match mid-game —
+# without it we'd lose those rows. The match is then incomplete (score / time
+# elapsed reflect when the user bailed), so downstream consumers should treat
+# it like any other persisted match.
+MATCH_END_EVENTS = {"MatchEnded", "PodiumStart", "MatchDestroyed"}
 
 
 class Hub:

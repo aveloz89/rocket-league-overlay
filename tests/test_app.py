@@ -175,6 +175,32 @@ def test_match_guid_change_persists_prior_match(fresh_state):
     assert ("MATCH_A", 100) in rows
 
 
+def test_match_destroyed_persists_match(fresh_state):
+    """If RL emits MatchDestroyed instead of MatchEnded (user quits mid-match
+    or the session is torn down), the in-progress match must still be saved."""
+    app.agg.me_id, app.agg.me_name = "Steam|1|0", "alas"
+    app.handle_event({"Event": "MatchInitialized", "Data": {"MatchGuid": "M_DESTROY"}})
+    app.handle_event({
+        "Event": "UpdateState",
+        "Data": {
+            "MatchGuid": "M_DESTROY",
+            "Players": [{"Name": "alas", "PrimaryId": "Steam|1|0", "TeamNum": 0,
+                         "Score": 150, "Goals": 1, "Shots": 1, "Saves": 0,
+                         "Assists": 0, "Demos": 0, "Touches": 3, "Boost": 50,
+                         "Speed": 0, "bOnGround": True, "bHasCar": True}],
+            "Game": {"Teams": [{"TeamNum": 0, "Score": 1}, {"TeamNum": 1, "Score": 0}],
+                     "TimeSeconds": 200, "bOvertime": False, "bReplay": False,
+                     "Arena": "stadium", "bHasTarget": False},
+        },
+    })
+    app.handle_event({"Event": "MatchDestroyed", "Data": {"MatchGuid": "M_DESTROY"}})
+
+    row = app.db.execute(
+        "SELECT score FROM matches WHERE match_guid='M_DESTROY'"
+    ).fetchone()
+    assert row == (150,)
+
+
 def test_match_ended_persists_match(fresh_state):
     app.agg.me_id, app.agg.me_name = "Steam|1|0", "alas"
     app.handle_event({"Event": "MatchInitialized", "Data": {"MatchGuid": "M1"}})

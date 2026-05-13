@@ -885,3 +885,66 @@ def test_team_size_resets_with_new_match():
 
     agg.on_initialized({"MatchGuid": "M2"})
     assert agg.team_size is None
+
+
+# ── Identity detection cascade ──────────────────────────────────────────────
+
+
+@pytest.mark.parametrize(
+    "key", ["TargetPlayer", "FocusedPlayer", "Player", "SpectatedPlayer", "PrimaryPlayer"]
+)
+def test_identity_detected_via_alternate_target_key(key):
+    """Psyonix has shipped the spectated-player payload under several keys
+    over RL's history. Detection must still lock on when only the alternate
+    key is populated."""
+    agg = MatchAggregator()
+    agg.on_initialized({"MatchGuid": "M1"})
+    for _ in range(30):
+        s = make_state(target="alas")
+        s["Game"].pop("Target", None)
+        s["Game"][key] = {"Name": "alas", "Shortcut": 1, "TeamNum": 0}
+        agg.on_update_state(s)
+    assert agg.me_id == "Steam|1|0"
+
+
+def test_identity_detection_ignores_bhas_target_flag():
+    """Some builds populate Target.Name without setting bHasTarget=True."""
+    agg = MatchAggregator()
+    agg.on_initialized({"MatchGuid": "M1"})
+    for _ in range(30):
+        s = make_state(target="alas")
+        s["Game"]["bHasTarget"] = False
+        agg.on_update_state(s)
+    assert agg.me_id == "Steam|1|0"
+
+
+# ── Ball state in UpdateState ────────────────────────────────────────────────
+
+
+def test_ball_speed_and_team_captured_from_update_state():
+    agg = MatchAggregator()
+    agg.me_id, agg.me_name = "Steam|1|0", "alas"
+    agg.on_initialized({"MatchGuid": "M1"})
+
+    s = make_state()
+    s["Game"]["Ball"] = {"Speed": 28.4, "TeamNum": 1}
+    agg.on_update_state(s)
+
+    out = agg.to_overlay_dict()
+    assert out["context"]["ball_speed"] == 28.4
+    assert out["context"]["ball_team"] == 1
+
+
+def test_ball_team_rejects_invalid_payload():
+    """Speed must be numeric; TeamNum must be 0 or 1."""
+    agg = MatchAggregator()
+    agg.me_id, agg.me_name = "Steam|1|0", "alas"
+    agg.on_initialized({"MatchGuid": "M1"})
+
+    s = make_state()
+    s["Game"]["Ball"] = {"Speed": "fast", "TeamNum": 5}
+    agg.on_update_state(s)
+
+    out = agg.to_overlay_dict()
+    assert out["context"]["ball_speed"] == 0.0
+    assert out["context"]["ball_team"] is None
