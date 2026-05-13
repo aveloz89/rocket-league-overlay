@@ -24,6 +24,7 @@ from storage import (
     open_db,
     save_config,
     save_match,
+    save_match_events,
     today_stats,
 )
 from tcp_client import stream_events
@@ -199,9 +200,8 @@ def _broadcast_coach() -> None:
 
 
 def _persist_current_match() -> bool:
-    """Persist a row for every player observed in the match.
-
-    Returns True if at least one row was newly inserted.
+    """Persist a row for every player observed in the match plus any buffered
+    discrete events (goals, kickoffs). Returns True if anything was inserted.
     """
     if db is None:
         return False
@@ -210,8 +210,15 @@ def _persist_current_match() -> bool:
     for snap in snapshots:
         if save_match(db, snap):
             inserted += 1
-    if inserted > 0:
-        log.info("saved match %s (%d player rows)", agg.match_guid, inserted)
+    # Drain the event buffer in the same transaction window so a duplicate
+    # call (MatchEnded + a later guid rotation) doesn't double-insert.
+    events_inserted = save_match_events(db, agg.match_guid, agg.events)
+    agg.events.clear()
+    if inserted > 0 or events_inserted > 0:
+        log.info(
+            "saved match %s (%d player rows, %d events)",
+            agg.match_guid, inserted, events_inserted,
+        )
         return True
     return False
 
@@ -250,6 +257,18 @@ def handle_event(event: dict) -> None:
 
     if name == "StatfeedEvent":
         agg.on_statfeed_event(data)
+        return
+
+    if name == "GoalScored":
+        agg.on_goal_scored(data)
+        return
+
+    if name == "CountdownBegin":
+        agg.on_countdown_begin(data)
+        return
+
+    if name == "RoundStarted":
+        agg.on_round_started(data)
         return
 
     if name in MATCH_END_EVENTS:

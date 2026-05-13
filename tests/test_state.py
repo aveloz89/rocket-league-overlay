@@ -1031,3 +1031,94 @@ def test_won_for_team_handles_each_side():
     assert agg._won_for_team(-1) is None
     agg.orange_score = 3
     assert agg._won_for_team(0) is None  # tie
+
+
+# ── Discrete events (goal / kickoff cycles) ─────────────────────────────────
+
+
+def test_on_goal_scored_buffers_event_with_scorer_and_speed():
+    agg = MatchAggregator()
+    agg.on_initialized({"MatchGuid": "M1"})
+
+    agg.on_goal_scored({
+        "Scorer": {"Name": "alas", "PrimaryId": "Steam|1|0", "TeamNum": 0},
+        "GoalSpeed": 84.5,
+        "GoalTime": 22.0,
+    })
+
+    assert len(agg.events) == 1
+    evt = agg.events[0]
+    assert evt["type"] == "goal"
+    assert evt["actor_id"] == "Steam|1|0"
+    assert evt["actor_name"] == "alas"
+    assert evt["actor_team"] == 0
+    assert evt["payload"] == {"speed": 84.5, "time": 22.0}
+
+
+@pytest.mark.parametrize("nested_key", ["Goal", "Player"])
+def test_on_goal_scored_scorer_cascade(nested_key):
+    """If Psyonix exposes the scorer under Goal or Player instead of Scorer,
+    we still pick up the name."""
+    agg = MatchAggregator()
+    agg.on_initialized({"MatchGuid": "M1"})
+
+    agg.on_goal_scored({nested_key: {"Name": "jstn", "TeamNum": 1}, "GoalSpeed": 60})
+
+    evt = agg.events[0]
+    assert evt["actor_name"] == "jstn"
+    assert evt["actor_team"] == 1
+
+
+def test_on_goal_scored_falls_back_to_top_level_player_name():
+    agg = MatchAggregator()
+    agg.on_initialized({"MatchGuid": "M1"})
+
+    agg.on_goal_scored({"PlayerName": "kio", "TeamNum": 0})
+
+    evt = agg.events[0]
+    assert evt["actor_name"] == "kio"
+    assert evt["actor_team"] == 0
+
+
+def test_on_goal_scored_omits_speed_when_payload_invalid():
+    """Garbage payloads (e.g. speed=None) must not pollute the persisted event."""
+    agg = MatchAggregator()
+    agg.on_initialized({"MatchGuid": "M1"})
+
+    agg.on_goal_scored({"Scorer": {"Name": "alas"}, "GoalSpeed": None, "GoalTime": "fast"})
+
+    evt = agg.events[0]
+    assert evt["payload"] == {}
+
+
+def test_kickoff_cycle_events_buffered_without_actor():
+    agg = MatchAggregator()
+    agg.on_initialized({"MatchGuid": "M1"})
+
+    agg.on_countdown_begin({})
+    agg.on_round_started({})
+
+    types = [e["type"] for e in agg.events]
+    assert types == ["countdown_begin", "round_started"]
+    for e in agg.events:
+        assert e["actor_id"] is None
+        assert e["actor_name"] is None
+        assert e["actor_team"] is None
+
+
+def test_events_buffer_resets_on_new_match():
+    agg = MatchAggregator()
+    agg.on_initialized({"MatchGuid": "M1"})
+    agg.on_goal_scored({"Scorer": {"Name": "alas"}})
+    assert len(agg.events) == 1
+
+    agg.on_initialized({"MatchGuid": "M2"})
+    assert agg.events == []
+
+
+def test_event_ignored_when_no_match_active():
+    """Events that arrive before MatchInitialized must be dropped silently."""
+    agg = MatchAggregator()
+    agg.on_goal_scored({"Scorer": {"Name": "alas"}})
+    agg.on_countdown_begin({})
+    assert agg.events == []

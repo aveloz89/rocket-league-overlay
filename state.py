@@ -48,6 +48,11 @@ _TARGET_KEYS: tuple[str, ...] = (
     "PrimaryPlayer",
 )
 
+# Nested keys probed when extracting a goal scorer from GoalScored payloads.
+# Order matches RLBS's own probing — Scorer is the most semantic, Goal/Player
+# are the legacy locations.
+_SCORER_KEYS: tuple[str, ...] = ("Scorer", "Goal", "Player")
+
 # Allowlist of StatfeedEvent names → MatchAggregator attribute.
 # Keys are lowercase for case-insensitive lookup.
 _STATFEED_EVENTS: dict[str, str] = {
@@ -83,6 +88,32 @@ def _target_name(game: dict) -> str | None:
             if name:
                 return name
     return None
+
+
+def _scorer_info(data: dict) -> dict:
+    """Extract scorer id/name/team from a GoalScored payload, probing the
+    nested keys Psyonix has used. Falls back to top-level fields. Returns an
+    empty dict if no candidate exposes a Name."""
+    for key in _SCORER_KEYS:
+        nested = data.get(key)
+        if isinstance(nested, dict):
+            name = nested.get("Name") or nested.get("PlayerName")
+            if name:
+                team = nested.get("TeamNum")
+                return {
+                    "id": nested.get("PrimaryId"),
+                    "name": name,
+                    "team": team if team in (0, 1) else None,
+                }
+    name = data.get("PlayerName") or data.get("ScorerName")
+    if name:
+        team = data.get("TeamNum")
+        return {
+            "id": data.get("PrimaryId"),
+            "name": name,
+            "team": team if team in (0, 1) else None,
+        }
+    return {}
 
 
 @dataclass
@@ -176,6 +207,10 @@ class MatchAggregator:
     # and a per-PrimaryId latest snapshot for end-of-match persistence.
     _latest_players: list[dict] = field(default_factory=list, repr=False)
     players_seen: dict[str, dict] = field(default_factory=dict, repr=False)
+
+    # Discrete event buffer (goal, kickoff cycles). Flushed by app.py once the
+    # match snapshot is persisted; cleared on reset_match via __init__.
+    events: list[dict] = field(default_factory=list, repr=False)
 
     def reset_match(self, match_guid: str) -> None:
         keep = (self.me_id, self.me_name)
@@ -365,6 +400,46 @@ class MatchAggregator:
             return
 
         setattr(self, attr, getattr(self, attr) + 1)
+
+    def on_goal_scored(self, data: dict) -> None:
+        """Buffer a 'goal' event with scorer attribution and goal speed/time."""
+        scorer = _scorer_info(data)
+        payload: dict = {}
+        speed = data.get("GoalSpeed")
+        if isinstance(speed, (int, float)):
+            payload["speed"] = float(speed)
+        elapsed = data.get("GoalTime")
+        if isinstance(elapsed, (int, float)):
+            payload["time"] = float(elapsed)
+        self._record_event("goal", actor=scorer, payload=payload)
+
+    def on_countdown_begin(self, data: dict) -> None:
+        """Buffer the pre-kickoff countdown marker (no actor)."""
+        self._record_event("countdown_begin")
+
+    def on_round_started(self, data: dict) -> None:
+        """Buffer the round-start marker (no actor)."""
+        self._record_event("round_started")
+
+    def _record_event(
+        self,
+        type_name: str,
+        actor: dict | None = None,
+        payload: dict | None = None,
+    ) -> None:
+        if self.match_guid is None:
+            return
+        actor = actor or {}
+        self.events.append(
+            {
+                "type": type_name,
+                "actor_id": actor.get("id"),
+                "actor_name": actor.get("name"),
+                "actor_team": actor.get("team"),
+                "occurred_at": datetime.now(timezone.utc).isoformat(),
+                "payload": payload or {},
+            }
+        )
 
     def _is_me(self, causer_id: str | None, causer_name: str | None) -> bool:
         """Return True if causer matches the identified user (id preferred, name fallback)."""
