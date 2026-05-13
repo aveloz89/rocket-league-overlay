@@ -296,7 +296,7 @@ DEMO_COACH_SNAPSHOT = {
         "id": 12, "match_guid": "DEMO-FIXED", "player_name": "alas",
         "started_at": "2026-05-02T20:00:00+00:00",
         "ended_at": "2026-05-02T20:05:00+00:00",
-        "blue_score": 4, "orange_score": 2, "me_team": 0, "won": True,
+        "blue_score": 4, "orange_score": 2, "me_team": 0, "team_size": 2, "won": True,
         "score": 425, "goals": 2, "shots": 5, "saves": 3, "assists": 1,
         "demos": 1, "demos_taken": 2, "touches": 18,
         "boost_avg": 54.0, "time_zero_boost_pct": 4.0,
@@ -426,23 +426,23 @@ async def coach() -> RedirectResponse:
 
 
 @app.get("/api/today")
-async def api_today() -> dict:
+async def api_today(mode: Optional[int] = None) -> dict:
     if app.state.demo:
         return dict(DEMO_TODAY_SNAPSHOT)
     if not agg.me_id or db is None:
         return dict(EMPTY_TODAY)
     # Run SQLite I/O in a thread so a slow disk doesn't block the event loop.
-    return await asyncio.to_thread(today_stats, db, agg.me_id)
+    return await asyncio.to_thread(today_stats, db, agg.me_id, mode)
 
 
 @app.get("/api/coach")
-async def api_coach() -> dict:
+async def api_coach(mode: Optional[int] = None) -> dict:
     if app.state.demo:
         return dict(DEMO_COACH_SNAPSHOT)
     if not agg.me_id or db is None:
         return dict(EMPTY_COACH)
     target_rank = _resolve_target_rank()
-    return await asyncio.to_thread(coach_stats, db, agg.me_id, target_rank)
+    return await asyncio.to_thread(coach_stats, db, agg.me_id, target_rank, mode)
 
 
 @app.post("/api/config/rank")

@@ -139,6 +139,7 @@ class MatchAggregator:
     in_replay: bool = False
     arena: str = ""
     clock: int = 0
+    team_size: int | None = None
 
     # Identity-detection state — track Target during the first frames after Initialized
     _detect_window_frames: int = field(default=0, repr=False)
@@ -180,6 +181,9 @@ class MatchAggregator:
         self.in_replay = bool(game.get("bReplay"))
         self.arena = game.get("Arena", self.arena)
         self.clock = int(game.get("TimeSeconds", self.clock))
+        team_size = game.get("TeamSize")
+        if isinstance(team_size, int) and team_size > 0:
+            self.team_size = team_size
 
         # Init match guid if first frame is UpdateState (no Initialized seen).
         # NOTE: caller is responsible for persisting the prior match snapshot
@@ -589,6 +593,7 @@ class MatchAggregator:
             "blue_score": self.blue_score,
             "orange_score": self.orange_score,
             "me_team": self.me_team,
+            "team_size": self.team_size,
             "won": self.won(),
             "score": self.score,
             "goals": self.goals,

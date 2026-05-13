@@ -590,3 +590,166 @@ def test_coach_stats_with_invalid_target_rank_returns_null(tmp_path: Path, monke
     db = open_db(tmp_path / "stats.db")
     result = coach_stats(db, "Steam|1|0", target_rank="nonexistent")
     assert result["rank_benchmark"] is None
+
+
+# ── team_size persistence + mode filtering ──────────────────────────────────
+
+
+def test_save_match_persists_team_size(tmp_path):
+    db = open_db(tmp_path / "stats.db")
+    save_match(db, make_snapshot(match_guid="2V2", team_size=2))
+    row = db.execute("SELECT team_size FROM matches WHERE match_guid='2V2'").fetchone()
+    assert row == (2,)
+
+
+def test_save_match_team_size_defaults_to_null(tmp_path):
+    """Snapshots from older code paths without team_size must store NULL, not 0."""
+    db = open_db(tmp_path / "stats.db")
+    save_match(db, make_snapshot())  # no team_size key
+    row = db.execute("SELECT team_size FROM matches WHERE match_guid='M1'").fetchone()
+    assert row == (None,)
+
+
+def test_today_stats_filters_by_mode(tmp_path):
+    from datetime import datetime
+
+    db = open_db(tmp_path / "stats.db")
+    today_iso = datetime.now().astimezone().isoformat()
+    save_match(db, make_snapshot(match_guid="A", started_at=today_iso, ended_at=today_iso,
+                                 won=True, team_size=2))
+    save_match(db, make_snapshot(match_guid="B", started_at=today_iso, ended_at=today_iso,
+                                 won=False, team_size=3))
+    save_match(db, make_snapshot(match_guid="C", started_at=today_iso, ended_at=today_iso,
+                                 won=True, team_size=None))  # legacy row
+
+    # All — includes every match regardless of team_size
+    assert today_stats(db, "Steam|1|0")["matches"] == 3
+    # Filtered modes exclude legacy NULL rows
+    assert today_stats(db, "Steam|1|0", mode=2)["matches"] == 1
+    assert today_stats(db, "Steam|1|0", mode=3)["matches"] == 1
+    assert today_stats(db, "Steam|1|0", mode=1)["matches"] == 0
+
+
+def test_coach_stats_filters_last_match_by_mode(tmp_path):
+    from datetime import datetime, timedelta
+
+    db = open_db(tmp_path / "stats.db")
+    base = datetime.now().astimezone()
+    # Most recent overall is 1v1
+    save_match(db, make_snapshot(
+        match_guid="ONES",
+        started_at=(base - timedelta(hours=1)).isoformat(),
+        ended_at=base.isoformat(),
+        team_size=1, score=900,
+    ))
+    save_match(db, make_snapshot(
+        match_guid="TWOS",
+        started_at=(base - timedelta(hours=2)).isoformat(),
+        ended_at=(base - timedelta(minutes=30)).isoformat(),
+        team_size=2, score=500,
+    ))
+
+    assert coach_stats(db, "Steam|1|0")["last_match"]["match_guid"] == "ONES"
+    assert coach_stats(db, "Steam|1|0", mode=1)["last_match"]["match_guid"] == "ONES"
+    assert coach_stats(db, "Steam|1|0", mode=2)["last_match"]["match_guid"] == "TWOS"
+    assert coach_stats(db, "Steam|1|0", mode=3)["last_match"] is None
+
+
+def test_coach_stats_mode_excludes_legacy_null_rows(tmp_path):
+    """Matches saved before team_size tracking (NULL) must not appear under
+    a specific mode tab — only in 'All'."""
+    db = open_db(tmp_path / "stats.db")
+    save_match(db, make_snapshot(match_guid="OLD", team_size=None))
+    save_match(db, make_snapshot(
+        match_guid="NEW", team_size=2,
+        started_at="2026-05-01T20:00:00+00:00",
+        ended_at="2026-05-01T20:05:00+00:00",
+    ))
+
+    assert coach_stats(db, "Steam|1|0", mode=2)["last_match"]["match_guid"] == "NEW"
+    # In "All", the most recent (NEW) is the last_match and rolling avg sees OLD
+    assert coach_stats(db, "Steam|1|0")["last_match"]["match_guid"] == "NEW"
+    assert coach_stats(db, "Steam|1|0")["rolling_avg"]["count"] == 1
+
+
+def test_coach_stats_rolling_avg_filters_by_mode(tmp_path):
+    from datetime import datetime, timedelta
+
+    db = open_db(tmp_path / "stats.db")
+    base = datetime.now().astimezone()
+    # Latest match is 2v2 with score 300 — excluded from rolling avg
+    save_match(db, make_snapshot(
+        match_guid="LATEST",
+        started_at=(base - timedelta(minutes=5)).isoformat(),
+        ended_at=base.isoformat(),
+        team_size=2, score=300,
+    ))
+    # Two 2v2 history matches with score 600 each
+    for i in range(2):
+        save_match(db, make_snapshot(
+            match_guid=f"P2V2_{i}",
+            started_at=(base - timedelta(hours=i + 2)).isoformat(),
+            ended_at=(base - timedelta(hours=i + 1)).isoformat(),
+            team_size=2, score=600,
+        ))
+    # One 3v3 history match with score 100 — must not pollute the 2v2 avg
+    save_match(db, make_snapshot(
+        match_guid="THREES",
+        started_at=(base - timedelta(hours=5)).isoformat(),
+        ended_at=(base - timedelta(hours=4)).isoformat(),
+        team_size=3, score=100,
+    ))
+
+    res = coach_stats(db, "Steam|1|0", mode=2)
+    assert res["rolling_avg"]["score"] == 600  # only the two P2V2 history rows
+
+
+def test_coach_stats_trend_filters_by_mode(tmp_path):
+    from datetime import datetime, timedelta
+
+    db = open_db(tmp_path / "stats.db")
+    today = datetime.now().astimezone()
+    yesterday = today - timedelta(days=1)
+
+    save_match(db, make_snapshot(match_guid="T2V2", started_at=today.isoformat(),
+                                 ended_at=today.isoformat(), won=True, team_size=2))
+    save_match(db, make_snapshot(match_guid="Y3V3", started_at=yesterday.isoformat(),
+                                 ended_at=yesterday.isoformat(), won=False, team_size=3))
+
+    res_2 = coach_stats(db, "Steam|1|0", mode=2)
+    days = [d["day"] for d in res_2["trend"]]
+    assert today.strftime("%Y-%m-%d") in days
+    assert yesterday.strftime("%Y-%m-%d") not in days
+
+
+def test_migration_adds_team_size_column_to_existing_db(tmp_path):
+    """A DB created before team_size existed must get the column on open."""
+    import sqlite3
+
+    db_path = tmp_path / "old.db"
+    conn = sqlite3.connect(str(db_path))
+    conn.execute("""
+        CREATE TABLE matches (
+            id INTEGER PRIMARY KEY,
+            match_guid TEXT NOT NULL,
+            player_id TEXT NOT NULL,
+            player_name TEXT,
+            started_at TEXT NOT NULL,
+            ended_at TEXT NOT NULL,
+            UNIQUE(match_guid, player_id)
+        )
+    """)
+    conn.execute(
+        "INSERT INTO matches (match_guid, player_id, started_at, ended_at) "
+        "VALUES (?, ?, ?, ?)",
+        ("OLD", "Steam|1|0", "2026-01-01T00:00:00+00:00", "2026-01-01T00:05:00+00:00"),
+    )
+    conn.commit()
+    conn.close()
+
+    migrated = open_db(db_path)
+    columns = {row[1] for row in migrated.execute("PRAGMA table_info(matches)")}
+    assert "team_size" in columns
+
+    row = migrated.execute("SELECT team_size FROM matches WHERE match_guid='OLD'").fetchone()
+    assert row == (None,)

@@ -831,3 +831,57 @@ def test_statfeed_counters_reset_on_new_match():
 
     agg.on_initialized({"MatchGuid": "M2"})
     assert agg.epic_saves == 0
+
+
+# ── team_size ────────────────────────────────────────────────────────────────
+
+
+def test_team_size_captured_from_update_state():
+    agg = MatchAggregator()
+    agg.me_id, agg.me_name = "Steam|1|0", "alas"
+    agg.on_initialized({"MatchGuid": "M1"})
+
+    state = make_state()
+    state["Game"]["TeamSize"] = 2
+    agg.on_update_state(state)
+
+    assert agg.team_size == 2
+    assert agg.to_db_snapshot()["team_size"] == 2
+
+
+def test_team_size_remains_none_when_field_missing():
+    agg = MatchAggregator()
+    agg.me_id, agg.me_name = "Steam|1|0", "alas"
+    agg.on_initialized({"MatchGuid": "M1"})
+
+    agg.on_update_state(make_state())  # no TeamSize
+
+    assert agg.team_size is None
+    assert agg.to_db_snapshot()["team_size"] is None
+
+
+def test_team_size_ignores_non_int_payload():
+    """Bad payload from the API must not corrupt team_size."""
+    agg = MatchAggregator()
+    agg.me_id, agg.me_name = "Steam|1|0", "alas"
+    agg.on_initialized({"MatchGuid": "M1"})
+
+    state = make_state()
+    state["Game"]["TeamSize"] = "two"
+    agg.on_update_state(state)
+
+    assert agg.team_size is None
+
+
+def test_team_size_resets_with_new_match():
+    agg = MatchAggregator()
+    agg.me_id, agg.me_name = "Steam|1|0", "alas"
+    agg.on_initialized({"MatchGuid": "M1"})
+
+    state = make_state()
+    state["Game"]["TeamSize"] = 3
+    agg.on_update_state(state)
+    assert agg.team_size == 3
+
+    agg.on_initialized({"MatchGuid": "M2"})
+    assert agg.team_size is None

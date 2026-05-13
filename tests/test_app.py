@@ -614,6 +614,26 @@ def test_api_coach_includes_rank_benchmark_when_configured(fresh_state, tmp_path
     assert "rank_benchmark" in result
 
 
+def test_api_coach_filters_by_mode_query_param(fresh_state):
+    """Matches with different team_size are partitioned by ?mode=N."""
+    from datetime import datetime
+
+    today_iso = datetime.now().astimezone().isoformat()
+    app.agg.me_id, app.agg.me_name = "Steam|1|0", "alas"
+    for guid, ts in (("ONES", 1), ("TWOS", 2), ("THREES", 3)):
+        app.db.execute(
+            "INSERT INTO matches (match_guid, player_id, started_at, ended_at, won, "
+            "score, goals, shots, team_size) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (guid, "Steam|1|0", today_iso, today_iso, 1, 300, 1, 2, ts),
+        )
+    app.db.commit()
+
+    assert asyncio.run(app.api_coach(mode=2))["last_match"]["match_guid"] == "TWOS"
+    assert asyncio.run(app.api_coach(mode=3))["last_match"]["match_guid"] == "THREES"
+    assert asyncio.run(app.api_today())["matches"] == 3
+    assert asyncio.run(app.api_today(mode=2))["matches"] == 1
+
+
 # ── /coach legacy redirect ───────────────────────────────────────────────────
 
 
