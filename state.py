@@ -421,6 +421,16 @@ class MatchAggregator:
         """Buffer the round-start marker (no actor)."""
         self._record_event("round_started")
 
+    def on_match_paused(self, data: dict) -> None:
+        """Buffer a pause marker. Paired with a matching match_unpaused row;
+        callers wanting elapsed-pause durations can diff the two timestamps."""
+        self._record_event("match_paused")
+
+    def on_match_unpaused(self, data: dict) -> None:
+        """Buffer an unpause marker. May arrive without a paired pause if the
+        Stats API stream missed it — downstream queries should tolerate that."""
+        self._record_event("match_unpaused")
+
     def _record_event(
         self,
         type_name: str,
